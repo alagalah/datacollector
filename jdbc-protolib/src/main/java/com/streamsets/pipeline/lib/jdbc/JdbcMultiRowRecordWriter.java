@@ -15,6 +15,7 @@
  */
 package com.streamsets.pipeline.lib.jdbc;
 
+import com.codahale.metrics.Timer;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Charsets;
 import com.google.common.hash.Funnel;
@@ -23,9 +24,14 @@ import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hashing;
 import com.streamsets.pipeline.api.Record;
 import com.streamsets.pipeline.api.StageException;
+import com.streamsets.pipeline.api.Target;
 import com.streamsets.pipeline.api.base.OnRecordErrorException;
+import com.streamsets.pipeline.api.Stage.Context;
+import com.streamsets.pipeline.api.impl.Utils;
 import com.streamsets.pipeline.lib.operation.OperationType;
 import com.streamsets.pipeline.lib.operation.UnsupportedOperationAction;
+import com.streamsets.pipeline.stage.common.DefaultErrorRecordHandler;
+import com.streamsets.pipeline.stage.common.ErrorRecordHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,6 +61,8 @@ public class JdbcMultiRowRecordWriter extends JdbcBaseRecordWriter {
   public static final int UNLIMITED_PARAMETERS = -1;
   private final boolean caseSensitive;
   private int maxPrepStmtParameters;
+  private final Timer queryTimer;
+  private final Timer commitTimer;
 
   /**
    * Class constructor
@@ -82,7 +90,8 @@ public class JdbcMultiRowRecordWriter extends JdbcBaseRecordWriter {
       List<JdbcFieldColumnMapping> generatedColumnMappings,
       JdbcRecordReader recordReader,
       boolean caseSensitive,
-      List<String> customDataSqlStateCodes
+      List<String> customDataSqlStateCodes,
+      Context context
   ) throws StageException {
     super(
         connectionString,
@@ -101,6 +110,8 @@ public class JdbcMultiRowRecordWriter extends JdbcBaseRecordWriter {
     this.maxPrepStmtParameters = maxPrepStmtParameters == UNLIMITED_PARAMETERS ? Integer.MAX_VALUE :
         maxPrepStmtParameters;
     this.caseSensitive = caseSensitive;
+    this.queryTimer = context.createTimer("Query Timer");
+    this.commitTimer = context.createTimer("Commit Timer");
   }
 
   @Override
@@ -149,7 +160,7 @@ public class JdbcMultiRowRecordWriter extends JdbcBaseRecordWriter {
         processQueue(queue, errorRecords, connection, maxRowsPerBatch, prevOpCode);
 
         if (!queue.isEmpty()) {
-          throw new IllegalStateException("Queue processed, but was not empty upon completion.");
+          throw new IllegalStateException(Utils.format("Queue processed, but was not empty upon completion ({} remaining items).", queue.size()));
         }
 
         queue.add(record);
@@ -160,13 +171,14 @@ public class JdbcMultiRowRecordWriter extends JdbcBaseRecordWriter {
 
       // Check if any records are left in queue unprocessed
       processQueue(queue, errorRecords, connection, maxRowsPerBatch, prevOpCode);
-      connection.commit();
+      try(Timer.Context t = commitTimer.time()) {
+        connection.commit();
+      }
     } catch (SQLException e) {
       handleSqlException(e);
     } finally {
       if (connection != null) {
         try {
-          connection.commit();
           connection.close();
         } catch (SQLException e) {
           handleSqlException(e);
@@ -211,10 +223,11 @@ public class JdbcMultiRowRecordWriter extends JdbcBaseRecordWriter {
         opCode == OperationType.UPDATE_CODE ? getColumnsToFieldNoPK() : getColumnsToFields()
     );
 
+    // Neither of the records have schema matching the table, so we will move all records to error stream
     if (columnsToParameters.isEmpty()) {
-      // no parameters found for configured columns
-      if (LOG.isWarnEnabled()) {
-        LOG.warn("No parameters found for record with ID {}; skipping", first.getHeader().getSourceId());
+      while(!queue.isEmpty()) {
+        Record record = queue.removeFirst();
+        errorRecords.add(new OnRecordErrorException(record, JdbcErrors.JDBC_90, getTableName()));
       }
       return;
     }
@@ -300,7 +313,9 @@ public class JdbcMultiRowRecordWriter extends JdbcBaseRecordWriter {
       if (LOG.isDebugEnabled()) {
         LOG.debug("Executing query: {}", statement.toString());
       }
-      statement.executeUpdate();
+      try(Timer.Context t = queryTimer.time()) {
+        statement.executeUpdate();
+      }
     } catch (SQLException ex) {
       if (getRollbackOnError()) {
         LOG.debug("Error due to {}. Rollback the batch.", ex.getMessage());

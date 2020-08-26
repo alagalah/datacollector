@@ -21,6 +21,8 @@ import com.streamsets.pipeline.api.ListBeanModel;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.credential.CredentialValue;
+import com.streamsets.pipeline.lib.AzureUtils;
+import com.streamsets.pipeline.stage.conf.DataLakeConnectionProtocol;
 import com.streamsets.pipeline.stage.destination.datalake.Errors;
 import com.streamsets.pipeline.stage.destination.hdfs.HadoopConfigBean;
 import com.streamsets.pipeline.stage.destination.hdfs.HdfsTargetConfigBean;
@@ -48,8 +50,6 @@ public class DataLakeTargetConfig extends HdfsTargetConfigBean {
   private static final String ADLS_GEN1_REFRESH_URL_KEY = "dfs.adls.oauth2.refresh.url";
   private static final String ADLS_GEN1_CLIENT_ID_KEY = "dfs.adls.oauth2.client.id";
   private static final String ADLS_GEN1_CLIENT_SECRET_KEY = "dfs.adls.oauth2.credential";
-
-  private static final String ADL_PROTOCOL = "adl://";
 
   @ConfigDef(
       required = true,
@@ -101,6 +101,7 @@ public class DataLakeTargetConfig extends HdfsTargetConfigBean {
       label = "Advanced Configuration",
       description = "Additional HDFS properties to pass to the underlying file system. These properties take precedence over those defined in HDFS configuration files",
       displayPosition = 60,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "DATALAKE"
   )
   @ListBeanModel
@@ -110,21 +111,23 @@ public class DataLakeTargetConfig extends HdfsTargetConfigBean {
   public void init(final Stage.Context context, List<Stage.ConfigIssue> issues) {
     initHiddenDefaults();
 
-    String accountFQDN = resolveCredentialValue(context, this.accountFQDN, ADLS_CONFIG_ACCOUNT_FQDN, issues);
-    this.hdfsUri = buildAdlUri(accountFQDN);
+    String accountFQDNString = resolveCredentialValue(context, this.accountFQDN, ADLS_CONFIG_ACCOUNT_FQDN, issues);
+    this.hdfsUri = buildAdlUri(accountFQDNString);
 
     String authEndPoint = resolveCredentialValue(context, this.authTokenEndpoint, ADLS_CONFIG_AUTH_TOKEN_ENDPOINT, issues);
-    String clientId = resolveCredentialValue(context, this.clientId, ADLS_CONFIG_CLIENT_ID, issues);
-    String clientKey = resolveCredentialValue(context, this.clientKey, ADLS_CONFIG_CLIENT_KEY, issues);
+    String clientIdString = resolveCredentialValue(context, this.clientId, ADLS_CONFIG_CLIENT_ID, issues);
+    String clientKeyString = resolveCredentialValue(context, this.clientKey, ADLS_CONFIG_CLIENT_KEY, issues);
 
     this.hdfsConfigs.add(new HadoopConfigBean(ADLS_GEN1_ACCESS_TOKEN_PROVIDER_KEY, ADLS_GEN1_ACCESS_TOKEN_PROVIDER_VALUE));
     this.hdfsConfigs.add(new HadoopConfigBean(ADLS_GEN1_REFRESH_URL_KEY, authEndPoint));
-    this.hdfsConfigs.add(new HadoopConfigBean(ADLS_GEN1_CLIENT_ID_KEY, clientId));
-    this.hdfsConfigs.add(new HadoopConfigBean(ADLS_GEN1_CLIENT_SECRET_KEY, clientKey));
+    this.hdfsConfigs.add(new HadoopConfigBean(ADLS_GEN1_CLIENT_ID_KEY, clientIdString));
+    this.hdfsConfigs.add(new HadoopConfigBean(ADLS_GEN1_CLIENT_SECRET_KEY, clientKeyString));
 
-    for (HadoopConfigBean configBean : this.advancedConfiguration) {
-      this.hdfsConfigs.add(configBean);
-    }
+    this.hdfsConfigs.addAll(this.advancedConfiguration);
+
+    this.hdfsConfigs.add(new HadoopConfigBean(AzureUtils.ADLS_USER_AGENT_STRING_KEY,
+        AzureUtils.buildUserAgentString(context)
+    ));
 
     super.init(context, issues);
   }
@@ -152,6 +155,6 @@ public class DataLakeTargetConfig extends HdfsTargetConfigBean {
   }
 
   private String buildAdlUri(String accountFQDN) {
-    return ADL_PROTOCOL + accountFQDN;
+    return DataLakeConnectionProtocol.ADL_PROTOCOL_SECURE.getProtocol() + accountFQDN;
   }
 }

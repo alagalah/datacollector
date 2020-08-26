@@ -35,13 +35,14 @@ import com.streamsets.datacollector.execution.runner.standalone.StandaloneRunner
 import com.streamsets.datacollector.http.SnappyWriterInterceptor;
 import com.streamsets.datacollector.json.ObjectMapperFactory;
 import com.streamsets.datacollector.main.RuntimeInfo;
-import com.streamsets.datacollector.restapi.bean.CounterJson;
-import com.streamsets.datacollector.restapi.bean.MeterJson;
-import com.streamsets.datacollector.restapi.bean.MetricRegistryJson;
-import com.streamsets.datacollector.restapi.bean.SDCMetricsJson;
+import com.streamsets.datacollector.event.json.CounterJson;
+import com.streamsets.datacollector.event.json.MeterJson;
+import com.streamsets.datacollector.event.json.MetricRegistryJson;
+import com.streamsets.datacollector.event.json.SDCMetricsJson;
 import com.streamsets.datacollector.store.PipelineStoreException;
 import com.streamsets.datacollector.util.AggregatorUtil;
 import com.streamsets.datacollector.util.Configuration;
+import com.streamsets.lib.security.http.RemoteSSOService;
 import com.streamsets.lib.security.http.SSOConstants;
 import com.streamsets.pipeline.api.ExecutionMode;
 import com.streamsets.pipeline.api.Record;
@@ -81,7 +82,7 @@ public class MetricsEventRunnable implements Runnable {
   private static final String JOB_ID = "JOB_ID";
   private static final String UPDATE_WAIT_TIME_MS = "UPDATE_WAIT_TIME_MS";
   public static final String TIME_SERIES_ANALYSIS = "TIME_SERIES_ANALYSIS";
-
+  public static final String CONTROL_HUB_METRICS_URL = "timeseries/rest/v1/metrics";
   public static final String RUNNABLE_NAME = "MetricsEventRunnable";
   private static final Logger LOG = LoggerFactory.getLogger(MetricsEventRunnable.class);
   private final ConcurrentMap<String, MetricRegistryJson> slaveMetrics;
@@ -97,15 +98,15 @@ public class MetricsEventRunnable implements Runnable {
   private final RuntimeInfo runtimeInfo;
   private BlockingQueue<Record> statsQueue;
   private PipelineConfiguration pipelineConfiguration;
+  private MetricRegistryJson metricRegistryJson;
 
   private boolean isDPMPipeline = false;
-  private String remoteTimeSeriesUrl;
   private String pipelineCommitId;
   private String jobId;
   private Integer waitTimeBetweenUpdates;
   private final int retryAttempts = 5;
   private boolean timeSeriesAnalysis = true;
-  private boolean isPipelineStopped = false;
+  private volatile boolean isPipelineStopped = false;
   private WebTarget webTarget;
   private Stopwatch stopwatch = null;
 
@@ -132,15 +133,15 @@ public class MetricsEventRunnable implements Runnable {
     this.scheduledDelay = configuration.get(REFRESH_INTERVAL_PROPERTY, REFRESH_INTERVAL_PROPERTY_DEFAULT);
     this.configuration = configuration;
     this.runtimeInfo = runtimeInfo;
+
+    PipelineBeanCreator.prepareForConnections(configuration, runtimeInfo);
   }
 
   public void onStopOrFinishPipeline() {
     this.threadHealthReporter = null;
     if (isDPMPipeline) {
-      // Send final metrics to DPM on stop
-      this.stopwatch = null;
-      this.isPipelineStopped = true;
-      this.run();
+      // Send final metrics to Control Hub on stop
+      sendMetricsInternal(true);
     }
   }
 
@@ -153,13 +154,35 @@ public class MetricsEventRunnable implements Runnable {
     this.initializeDPMMetricsVariables();
   }
 
-  @Override
-  public void run() {
-    // Added log trace to debug SDC-725
+  public void setMetricRegistryJson(MetricRegistryJson metricRegistryJson) {
+    this.metricRegistryJson = metricRegistryJson;
+  }
+
+  private void sendMetricsInternal(boolean onPipelineStop) {
     if (LOG.isTraceEnabled()) {
       SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
-      LOG.trace("MetricsEventRunnable Run - {}", sdf.format(new Date()));
+      LOG.trace("MetricsEventRunnable Run - {}, Is pipeline stopped - {}", sdf.format(new Date()), onPipelineStop);
     }
+    if (!isPipelineStopped) {
+      synchronized (this) {
+        if (!isPipelineStopped) {
+          if (onPipelineStop) {
+            this.stopwatch = null;
+            this.isPipelineStopped = true;
+          }
+          doRun();
+        }
+      }
+    }
+  }
+
+  @Override
+  public void run() {
+    sendMetricsInternal(false);
+  }
+
+
+  private void doRun() {
     try {
       if(threadHealthReporter != null) {
         threadHealthReporter.reportHealth(RUNNABLE_NAME, scheduledDelay, System.currentTimeMillis());
@@ -174,7 +197,10 @@ public class MetricsEventRunnable implements Runnable {
         if (state.getExecutionMode() == ExecutionMode.CLUSTER_BATCH
           || state.getExecutionMode() == ExecutionMode.CLUSTER_YARN_STREAMING
           || state.getExecutionMode() == ExecutionMode.CLUSTER_MESOS_STREAMING) {
-          MetricRegistryJson metricRegistryJson = getAggregatedMetrics();
+          MetricRegistryJson json = getAggregatedMetrics();
+          metricsJSONStr = objectMapper.writer().writeValueAsString(json);
+        } else if ((state.getExecutionMode() == ExecutionMode.BATCH
+            || state.getExecutionMode() == ExecutionMode.STREAMING) && metricRegistryJson != null) {
           metricsJSONStr = objectMapper.writer().writeValueAsString(metricRegistryJson);
         } else {
           metricsJSONStr = objectMapper.writer().writeValueAsString(metricRegistry);
@@ -298,12 +324,9 @@ public class MetricsEventRunnable implements Runnable {
       isDPMPipeline = isRemotePipeline(state);
       if (isDPMPipeline && isWriteStatsToDPMDirectlyEnabled()) {
         PipelineConfigBean pipelineConfigBean = PipelineBeanCreator.get()
-            .create(pipelineConfiguration, new ArrayList<>(), null);
+            .create(pipelineConfiguration, new ArrayList<>(), null, null, null);
         for (String key : pipelineConfigBean.constants.keySet()) {
           switch (key) {
-            case REMOTE_TIMESERIES_URL:
-              remoteTimeSeriesUrl = (String) pipelineConfigBean.constants.get(key);
-              break;
             case PIPELINE_COMMIT_ID:
               pipelineCommitId = (String) pipelineConfigBean.constants.get(key);
               break;
@@ -327,12 +350,15 @@ public class MetricsEventRunnable implements Runnable {
           }
         }
 
-        if (remoteTimeSeriesUrl != null) {
-          Client client = ClientBuilder.newBuilder().build();
-          client.register(new CsrfProtectionFilter("CSRF"));
-          client.register(SnappyWriterInterceptor.class);
-          webTarget = client.target(remoteTimeSeriesUrl);
-        }
+        String remoteBaseURL = RemoteSSOService.getValidURL(configuration.get(
+            RemoteSSOService.DPM_BASE_URL_CONFIG,
+            RemoteSSOService.DPM_BASE_URL_DEFAULT
+        ));
+        String remoteTimeSeriesUrl = remoteBaseURL + CONTROL_HUB_METRICS_URL;
+        Client client = ClientBuilder.newBuilder().build();
+        client.register(new CsrfProtectionFilter("CSRF"));
+        client.register(SnappyWriterInterceptor.class);
+        webTarget = client.target(remoteTimeSeriesUrl);
       }
     } catch (PipelineStoreException e) {
       LOG.error(Utils.format("Error when reading pipeline state: {}", e.getErrorMessage(), e));
@@ -349,7 +375,11 @@ public class MetricsEventRunnable implements Runnable {
       sdcMetricsJson.setAggregated(false);
       sdcMetricsJson.setSdcId(runtimeInfo.getId());
       sdcMetricsJson.setMasterSdcId(runtimeInfo.getMasterSDCId());
-      sdcMetricsJson.setMetrics(ObjectMapperFactory.get().readValue(metricsJSONStr, MetricRegistryJson.class));
+      if (metricRegistryJson != null) {
+        sdcMetricsJson.setMetrics(metricRegistryJson);
+      } else {
+        sdcMetricsJson.setMetrics(ObjectMapperFactory.get().readValue(metricsJSONStr, MetricRegistryJson.class));
+      }
       Map<String, String> metadata = new HashMap<>();
       if (pipelineConfiguration.getMetadata() != null && !pipelineConfiguration.getMetadata().isEmpty()) {
         for (Map.Entry<String, Object> e : pipelineConfiguration.getMetadata().entrySet()) {
@@ -363,7 +393,9 @@ public class MetricsEventRunnable implements Runnable {
       metadata.put(AggregatorUtil.TIME_SERIES_ANALYSIS, String.valueOf(timeSeriesAnalysis));
       sdcMetricsJson.setMetadata(metadata);
 
-      sendUpdate(ImmutableList.of(sdcMetricsJson));
+      if (sdcMetricsJson.getMetrics() != null) {
+        sendUpdate(ImmutableList.of(sdcMetricsJson));
+      }
 
       if (stopwatch == null) {
         stopwatch = Stopwatch.createStarted();
@@ -398,22 +430,23 @@ public class MetricsEventRunnable implements Runnable {
                 )
             );
         if (response.getStatus() == HttpURLConnection.HTTP_OK) {
+          LOG.trace("Sending metrics was successful");
           return;
         } else if (response.getStatus() == HttpURLConnection.HTTP_UNAVAILABLE) {
-          LOG.warn("Error writing to time-series app: DPM unavailable");
+          LOG.warn("Error writing to time-series app: Control Hub unavailable");
           // retry
         } else if (response.getStatus() == HttpURLConnection.HTTP_FORBIDDEN) {
           // no retry in this case
           String errorResponseMessage = response.readEntity(String.class);
-          LOG.error(Utils.format("Error writing to DPM: {}", errorResponseMessage));
+          LOG.error(Utils.format("Error writing to Control Hub: {}", errorResponseMessage));
           return;
         } else {
           String responseMessage = response.readEntity(String.class);
-          LOG.error(Utils.format("Error writing to DPM: {}", responseMessage));
+          LOG.error(Utils.format("Error writing to Control Hub: {}", responseMessage));
           //retry
         }
       } catch (Exception ex) {
-        LOG.error(Utils.format("Error writing to DPM: {}", ex.toString(), ex));
+        LOG.error(Utils.format("Error writing to Control Hub: {}", ex.toString(), ex));
         // retry
       } finally {
         if (response != null) {
@@ -423,14 +456,14 @@ public class MetricsEventRunnable implements Runnable {
     }
 
     // no success after retry
-    LOG.warn("Unable to write metrics to DPM after {} attempts", retryAttempts);
+    LOG.warn("Unable to write metrics to Control Hub after {} attempts", retryAttempts);
   }
 
   public static void sleep(int secs) {
     try {
       Thread.sleep(secs * 1000);
     } catch (InterruptedException ex) {
-      String msg = "Interrupted while attempting to fetch latest Metrics from DPM";
+      String msg = "Interrupted while attempting to fetch latest Metrics from Control Hub";
       LOG.error(msg);
       throw new RuntimeException(msg, ex);
     }

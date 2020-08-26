@@ -17,7 +17,9 @@
 package com.streamsets.datacollector.event.handler.remote;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.streamsets.datacollector.config.ConnectionConfiguration;
 import com.streamsets.datacollector.config.PipelineConfiguration;
+import com.streamsets.datacollector.execution.PipelineState;
 import com.streamsets.datacollector.config.RuleDefinitions;
 import com.streamsets.datacollector.event.dto.AckEvent;
 import com.streamsets.datacollector.event.dto.PipelineStartEvent;
@@ -34,6 +36,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.function.Function;
 
@@ -75,9 +78,9 @@ public class ColonCompatibleRemoteDataCollector implements DataCollector {
 
   @Override
   public void start(
-      Runner.StartPipelineContext context, String name, String rev
+      Runner.StartPipelineContext context, String name, String rev,  Set<String> groups
   ) throws PipelineException, StageException {
-    remoteDataCollector.start(context, getCompatibleName(name), rev);
+    remoteDataCollector.start(context, getCompatibleName(name), rev, groups);
   }
 
   @Override
@@ -105,7 +108,8 @@ public class ColonCompatibleRemoteDataCollector implements DataCollector {
       PipelineConfiguration pipelineConfiguration,
       RuleDefinitions ruleDefinitions,
       Acl acl,
-      Map<String, Object> metadata
+      Map<String, Object> metadata,
+      Map<String, ConnectionConfiguration> connections
   ) throws PipelineException {
     return remoteDataCollector.savePipeline(
         user,
@@ -116,7 +120,8 @@ public class ColonCompatibleRemoteDataCollector implements DataCollector {
         pipelineConfiguration,
         ruleDefinitions,
         acl,
-        metadata
+        metadata,
+        connections
     );
   }
 
@@ -156,7 +161,8 @@ public class ColonCompatibleRemoteDataCollector implements DataCollector {
       long timeoutMillis,
       boolean testOrigin,
       List<PipelineStartEvent.InterceptorConfiguration> interceptorConfs,
-      Function<Object, Void> afterActionsFunction
+      Function<Object, Void> afterActionsFunction,
+      Map<String, ConnectionConfiguration> connections
   ) throws PipelineException {
     return remoteDataCollector.previewPipeline(
         user,
@@ -171,7 +177,8 @@ public class ColonCompatibleRemoteDataCollector implements DataCollector {
         timeoutMillis,
         testOrigin,
         interceptorConfs,
-        afterActionsFunction
+        afterActionsFunction,
+        connections
     );
   }
 
@@ -216,4 +223,15 @@ public class ColonCompatibleRemoteDataCollector implements DataCollector {
   public void storeConfiguration(Map<String, String> newConfiguration) throws IOException {
     remoteDataCollector.storeConfiguration(newConfiguration);
   }
+
+  @Override
+  public Runner getRunner(String name, String rev) throws PipelineException  {
+    return remoteDataCollector.getRunner(name, rev);
+  }
+
+  @Override
+  public List<PipelineState> getRemotePipelines() throws PipelineException {
+    return remoteDataCollector.getRemotePipelines();
+  }
+
 }

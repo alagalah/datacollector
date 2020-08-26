@@ -21,6 +21,7 @@ import com.streamsets.pipeline.lib.kafka.KafkaAutoOffsetReset;
 import com.streamsets.pipeline.lib.kafka.KafkaErrors;
 import com.streamsets.pipeline.stage.origin.multikafka.MultiSdcKafkaConsumer;
 import com.streamsets.pipeline.stage.origin.multikafka.loader.KafkaConsumerLoader;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -35,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class Kafka0_10ConsumerLoader extends KafkaConsumerLoader {
@@ -148,9 +150,9 @@ public class Kafka0_10ConsumerLoader extends KafkaConsumerLoader {
    */
   private class WrapperKafkaConsumer implements MultiSdcKafkaConsumer {
 
-    private KafkaConsumer delegate;
+    private Consumer delegate;
 
-    public WrapperKafkaConsumer(KafkaConsumer consumer) {
+    public WrapperKafkaConsumer(Consumer consumer) {
       this.delegate = consumer;
     }
 
@@ -175,6 +177,24 @@ public class Kafka0_10ConsumerLoader extends KafkaConsumerLoader {
     }
 
     @Override
-    public void commitSync() { delegate.commitSync(); }
+    public void commitSync(Map offsets) { delegate.commitSync(offsets); }
+
+    @Override
+    public List<TopicPartition> getTopicPartitions(String topic) {
+      return ((Set<PartitionInfo>) delegate.assignment())
+          .stream()
+          .map(partitionInfo -> new TopicPartition(topic, partitionInfo.partition()))
+          .collect(Collectors.toList());
+    }
+
+    @Override
+    public long getOffset(TopicPartition topicPartition) {
+      return delegate.position(topicPartition);
+    }
+
+    @Override
+    public Long getCommittedOffset(TopicPartition topicPartition) {
+      return delegate.committed(topicPartition) == null ? null : delegate.committed(topicPartition).offset();
+    }
   }
 }

@@ -20,8 +20,9 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.io.BaseEncoding;
+import com.streamsets.datacollector.activation.Activation;
 import com.streamsets.datacollector.config.DataRuleDefinition;
+import com.streamsets.datacollector.config.DetachedConnectionConfiguration;
 import com.streamsets.datacollector.config.DetachedStageConfiguration;
 import com.streamsets.datacollector.config.DriftRuleDefinition;
 import com.streamsets.datacollector.config.MetricElement;
@@ -30,37 +31,32 @@ import com.streamsets.datacollector.config.MetricsRuleDefinition;
 import com.streamsets.datacollector.config.PipelineConfiguration;
 import com.streamsets.datacollector.config.PipelineFragmentConfiguration;
 import com.streamsets.datacollector.config.RuleDefinitions;
-import com.streamsets.datacollector.config.ServiceDefinition;
-import com.streamsets.datacollector.config.ServiceDependencyDefinition;
 import com.streamsets.datacollector.config.StageConfiguration;
-import com.streamsets.datacollector.config.StageDefinition;
 import com.streamsets.datacollector.creation.PipelineBeanCreator;
 import com.streamsets.datacollector.creation.PipelineConfigBean;
 import com.streamsets.datacollector.creation.RuleDefinitionsConfigBean;
+import com.streamsets.datacollector.credential.CredentialStoresTask;
 import com.streamsets.datacollector.event.handler.remote.RemoteDataCollector;
 import com.streamsets.datacollector.execution.Manager;
 import com.streamsets.datacollector.execution.PipelineState;
 import com.streamsets.datacollector.execution.PipelineStatus;
 import com.streamsets.datacollector.json.ObjectMapperFactory;
+import com.streamsets.datacollector.main.BuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.main.UserGroupManager;
 import com.streamsets.datacollector.restapi.bean.AddLabelsRequestJson;
 import com.streamsets.datacollector.restapi.bean.BeanHelper;
-import com.streamsets.datacollector.restapi.bean.DefinitionsJson;
+import com.streamsets.datacollector.restapi.bean.DetachedConnectionConfigurationJson;
 import com.streamsets.datacollector.restapi.bean.DetachedStageConfigurationJson;
 import com.streamsets.datacollector.restapi.bean.MultiStatusResponseJson;
 import com.streamsets.datacollector.restapi.bean.PipelineConfigurationJson;
-import com.streamsets.datacollector.restapi.bean.PipelineDefinitionJson;
 import com.streamsets.datacollector.restapi.bean.PipelineEnvelopeJson;
 import com.streamsets.datacollector.restapi.bean.PipelineFragmentConfigurationJson;
-import com.streamsets.datacollector.restapi.bean.PipelineFragmentDefinitionJson;
 import com.streamsets.datacollector.restapi.bean.PipelineFragmentEnvelopeJson;
 import com.streamsets.datacollector.restapi.bean.PipelineInfoJson;
-import com.streamsets.datacollector.restapi.bean.PipelineRulesDefinitionJson;
 import com.streamsets.datacollector.restapi.bean.PipelineStateJson;
 import com.streamsets.datacollector.restapi.bean.RuleDefinitionsJson;
 import com.streamsets.datacollector.restapi.bean.StageConfigurationJson;
-import com.streamsets.datacollector.restapi.bean.StageDefinitionJson;
 import com.streamsets.datacollector.restapi.bean.UserJson;
 import com.streamsets.datacollector.stagelibrary.StageLibraryTask;
 import com.streamsets.datacollector.store.AclStoreTask;
@@ -68,11 +64,14 @@ import com.streamsets.datacollector.store.PipelineInfo;
 import com.streamsets.datacollector.store.PipelineStoreException;
 import com.streamsets.datacollector.store.PipelineStoreTask;
 import com.streamsets.datacollector.store.impl.AclPipelineStoreTask;
+import com.streamsets.datacollector.util.ActivationUtil;
 import com.streamsets.datacollector.util.AuthzRole;
+import com.streamsets.datacollector.util.Configuration;
 import com.streamsets.datacollector.util.ContainerError;
 import com.streamsets.datacollector.util.EdgeUtil;
 import com.streamsets.datacollector.util.PipelineConfigurationUtil;
 import com.streamsets.datacollector.util.PipelineException;
+import com.streamsets.datacollector.validation.DetachedConnectionValidator;
 import com.streamsets.datacollector.validation.DetachedStageValidator;
 import com.streamsets.datacollector.validation.PipelineConfigurationValidator;
 import com.streamsets.datacollector.validation.PipelineFragmentConfigurationValidator;
@@ -116,7 +115,6 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -125,10 +123,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -166,6 +161,7 @@ public class PipelineStoreResource {
   private static final String MICROSERVICE = "MICROSERVICE";
 
   private static final String SYSTEM_ALL_PIPELINES = "system:allPipelines";
+  private static final String SYSTEM_SAMPLE_PIPELINES = "system:samplePipelines";
   private static final String SYSTEM_EDGE_PIPELINES = "system:edgePipelines";
   private static final String SYSTEM_MICROSERVICE_PIPELINES = "system:microServicePipelines";
   private static final String SYSTEM_PUBLISHED_PIPELINES = "system:publishedPipelines";
@@ -181,10 +177,9 @@ public class PipelineStoreResource {
 
   private static final String PIPELINE_IDS = "pipelineIds";
 
-  private static final String PIPELINE_ID_REGEX = "[\\W]|_";
-
   private static final List<String> SYSTEM_PIPELINE_LABELS = ImmutableList.of(
       SYSTEM_ALL_PIPELINES,
+      SYSTEM_SAMPLE_PIPELINES,
       SYSTEM_EDGE_PIPELINES,
       SYSTEM_MICROSERVICE_PIPELINES,
       SYSTEM_RUNNING_PIPELINES,
@@ -196,6 +191,7 @@ public class PipelineStoreResource {
 
   private static final List<String> DPM_ENABLED_SYSTEM_PIPELINE_LABELS = ImmutableList.of(
       SYSTEM_ALL_PIPELINES,
+      SYSTEM_SAMPLE_PIPELINES,
       SYSTEM_PUBLISHED_PIPELINES,
       SYSTEM_DPM_CONTROLLED_PIPELINES,
       SYSTEM_LOCAL_PIPELINES,
@@ -211,28 +207,41 @@ public class PipelineStoreResource {
   private static final Logger LOG = LoggerFactory.getLogger(PipelineStoreResource.class);
 
   private final RuntimeInfo runtimeInfo;
+  private final BuildInfo buildInfo;
+  private final Configuration configuration;
   private final Manager manager;
   private final PipelineStoreTask store;
   private final StageLibraryTask stageLibrary;
+  private final CredentialStoresTask credentialStoresTask;
   private final URI uri;
   private final String user;
+  private final Activation activation;
 
   @Inject
   public PipelineStoreResource(
       URI uri,
       Principal principal,
       StageLibraryTask stageLibrary,
+      CredentialStoresTask credentialStoresTask,
       PipelineStoreTask store,
       RuntimeInfo runtimeInfo,
+      BuildInfo buildInfo,
+      Configuration configuration,
       Manager manager,
       UserGroupManager userGroupManager,
-      AclStoreTask aclStore
+      AclStoreTask aclStore,
+      Activation activation
   ) {
     this.uri = uri;
     this.user = principal.getName();
     this.stageLibrary = stageLibrary;
+    this.credentialStoresTask = credentialStoresTask;
     this.runtimeInfo = runtimeInfo;
+    this.buildInfo = buildInfo;
+    this.configuration = configuration;
     this.manager = manager;
+    this.activation = activation;
+    PipelineBeanCreator.prepareForConnections(configuration, runtimeInfo);
 
     UserJson currentUser;
     if (runtimeInfo.isDPMEnabled()) {
@@ -313,7 +322,22 @@ public class PipelineStoreResource {
   ) throws PipelineException {
     RestAPIUtils.injectPipelineInMDC("*");
 
-    final List<PipelineInfo> pipelineInfoList = store.getPipelines();
+    final List<PipelineInfo> pipelineInfoList;
+    if (SYSTEM_SAMPLE_PIPELINES.equals(label)) {
+      pipelineInfoList = store.getSamplePipelines();
+    } else {
+      pipelineInfoList = store.getPipelines().stream().filter(p -> {
+        boolean includeInList = true;
+        try {
+          manager.getPipelineState(p.getPipelineId(), p.getLastRev());
+        } catch (Exception e) {
+          LOG.error(Utils.format("State file not found for pipeline {}", p.getTitle()), e);
+          includeInList = false;
+        }
+        return includeInList;
+      }).collect(Collectors.toList());
+    }
+
     final Map<String, PipelineState> pipelineStateCache = new HashMap<>();
 
     Collection<PipelineInfo> filteredCollection = Collections2.filter(pipelineInfoList, pipelineInfo -> {
@@ -326,6 +350,7 @@ public class PipelineStoreResource {
           Map<String, Object> metadata = pipelineInfo.getMetadata();
           switch (label) {
             case SYSTEM_ALL_PIPELINES:
+            case SYSTEM_SAMPLE_PIPELINES:
               return true;
             case SYSTEM_EDGE_PIPELINES:
               PipelineState state = manager.getPipelineState(pipelineInfo.getPipelineId(), pipelineInfo.getLastRev());
@@ -452,13 +477,15 @@ public class PipelineStoreResource {
       List<PipelineInfoJson> subList = BeanHelper.wrapPipelineInfo(filteredList.subList(offset, endIndex));
       if (includeStatus) {
         List<PipelineStateJson> statusList = new ArrayList<>(subList.size());
-        for (PipelineInfoJson pipelineInfoJson: subList) {
-          PipelineState state = pipelineStateCache.get(pipelineInfoJson.getPipelineId());
-          if (state == null) {
-            state = manager.getPipelineState(pipelineInfoJson.getPipelineId(), pipelineInfoJson.getLastRev());
-          }
-          if(state != null) {
-            statusList.add(BeanHelper.wrapPipelineState(state, true));
+        if (!SYSTEM_SAMPLE_PIPELINES.equals(label)) {
+          for (PipelineInfoJson pipelineInfoJson: subList) {
+            PipelineState state = pipelineStateCache.get(pipelineInfoJson.getPipelineId());
+            if (state == null) {
+              state = manager.getPipelineState(pipelineInfoJson.getPipelineId(), pipelineInfoJson.getLastRev());
+            }
+            if(state != null) {
+              statusList.add(BeanHelper.wrapPipelineState(state, true));
+            }
           }
         }
         responseData = ImmutableList.of(subList, statusList);
@@ -568,6 +595,7 @@ public class PipelineStoreResource {
   })
   public Response importPipelines(
       @FormDataParam("file") InputStream uploadedInputStream,
+      @QueryParam("encryptCredentials") @DefaultValue("false") boolean encryptCredentials,
       @Context SecurityContext context
   ) throws IOException {
     RestAPIUtils.injectPipelineInMDC("*");
@@ -590,7 +618,8 @@ public class PipelineStoreResource {
                 true,
                 envelope,
                 false,
-                false
+                false,
+                encryptCredentials
             );
             successEntities.add(envelope.getPipelineConfig().getInfo());
           } catch (Exception ex) {
@@ -629,11 +658,12 @@ public class PipelineStoreResource {
         try {
           PipelineConfiguration pipelineConfig = store.load(pipelineId, "0");
           RuleDefinitions ruleDefinitions = store.retrieveRules(pipelineId, "0");
-          List<ServiceDefinition> serviceDefinitions = stageLibrary.getServiceDefinitions();
-          PipelineEnvelopeJson pipelineEnvelope = getPipelineEnvelope(
+          PipelineEnvelopeJson pipelineEnvelope = PipelineConfigurationUtil.getPipelineEnvelope(
+              stageLibrary,
+              credentialStoresTask,
+              configuration,
               pipelineConfig,
               ruleDefinitions,
-              serviceDefinitions,
               includeLibraryDefinitions,
               includePlainTextCredentials
           );
@@ -663,15 +693,24 @@ public class PipelineStoreResource {
       @QueryParam("rev") @DefaultValue("0") String rev,
       @QueryParam("get") @DefaultValue("pipeline") String get,
       @QueryParam("attachment") @DefaultValue("false") Boolean attachment
-  ) throws PipelineException, URISyntaxException {
-    PipelineInfo pipelineInfo = store.getInfo(name);
-    RestAPIUtils.injectPipelineInMDC(pipelineInfo.getTitle(), pipelineInfo.getPipelineId());
+  ) throws PipelineException {
+    if (!get.equals("samplePipeline")) {
+      PipelineInfo pipelineInfo = store.getInfo(name);
+      RestAPIUtils.injectPipelineInMDC(pipelineInfo.getTitle(), pipelineInfo.getPipelineId());
+    }
     Object data;
     String title = name;
     switch (get) {
       case "pipeline":
         PipelineConfiguration pipeline = store.load(name, rev);
-        PipelineConfigurationValidator validator = new PipelineConfigurationValidator(stageLibrary, name, pipeline);
+        PipelineConfigurationValidator validator = new PipelineConfigurationValidator(
+            stageLibrary,
+            buildInfo,
+            name,
+            pipeline,
+            user,
+            new HashMap<>()
+        );
         pipeline = validator.validate();
         data = BeanHelper.wrapPipelineConfiguration(pipeline);
         title = pipeline.getTitle() != null ? pipeline.getTitle() : pipeline.getInfo().getPipelineId();
@@ -681,6 +720,9 @@ public class PipelineStoreResource {
         break;
       case "history":
         data = BeanHelper.wrapPipelineRevInfo(store.getHistory(name));
+        break;
+      case "samplePipeline":
+        data = store.loadSamplePipeline(name);
         break;
       default:
         throw new IllegalArgumentException(Utils.format("Invalid value for parameter 'get': {}", get));
@@ -719,17 +761,17 @@ public class PipelineStoreResource {
   ) throws PipelineException, IOException {
     String pipelineId = pipelineTitle;
     if (autoGeneratePipelineId) {
-      pipelineId = pipelineTitle.replaceAll(PIPELINE_ID_REGEX, "") + UUID.randomUUID().toString();
+      pipelineId = PipelineConfigurationUtil.generatePipelineId(pipelineTitle);
     }
     RestAPIUtils.injectPipelineInMDC(pipelineTitle + "/" + pipelineId);
     PipelineConfiguration pipelineConfig = store.create(user, pipelineId, pipelineTitle, description, false, draft,
-        new HashMap<String, Object>()
+        new HashMap<>()
     );
 
     if (pipelineType.equals(DATA_COLLECTOR_EDGE)) {
       List<Config> newConfigs = createWithNewConfig(
           pipelineConfig.getConfiguration(),
-          new Config("executionMode", ExecutionMode.EDGE.name())
+          ImmutableMap.of("executionMode", new Config("executionMode", ExecutionMode.EDGE.name()))
       );
       pipelineConfig.setConfiguration(newConfigs);
       if (!draft) {
@@ -738,22 +780,20 @@ public class PipelineStoreResource {
             pipelineConfig.getPipelineId(),
             pipelineConfig.getInfo().getLastRev(),
             pipelineConfig.getDescription(),
-            pipelineConfig
+            pipelineConfig,
+            true
         );
       }
     } else if (pipelineType.equals(STREAMING_MODE)) {
-      List<Config> newConfigs = createWithNewConfig(
-          pipelineConfig.getConfiguration(),
-          new Config("executionMode", ExecutionMode.STREAMING.name())
-      );
-      pipelineConfig.setConfiguration(newConfigs);
+      setStreamingModeDefaults(pipelineConfig);
       if (!draft) {
         pipelineConfig = store.save(
             user,
             pipelineConfig.getPipelineId(),
             pipelineConfig.getInfo().getLastRev(),
             pipelineConfig.getDescription(),
-            pipelineConfig
+            pipelineConfig,
+            true
         );
       }
     } else if (pipelineType.equals(MICROSERVICE)) {
@@ -777,7 +817,8 @@ public class PipelineStoreResource {
               pipelineConfig.getPipelineId(),
               pipelineConfig.getInfo().getLastRev(),
               microServiceTemplate.getDescription(),
-              microServiceTemplate
+              microServiceTemplate,
+              false
           );
         } else {
           microServiceTemplate.setInfo(pipelineConfig.getInfo());
@@ -834,17 +875,22 @@ public class PipelineStoreResource {
 
     PipelineConfigurationValidator validator = new PipelineConfigurationValidator(
         stageLibrary,
+        buildInfo,
         pipelineId,
-        pipelineConfig
+        pipelineConfig,
+        user,
+        new HashMap<>()
     );
     pipelineConfig = validator.validate();
 
     if (draft) {
       return Response.created(UriBuilder.fromUri(uri).path(pipelineId).build())
-          .entity(getPipelineEnvelope(
+          .entity(PipelineConfigurationUtil.getPipelineEnvelope(
+              stageLibrary,
+              credentialStoresTask,
+              configuration,
               pipelineConfig,
               ruleDefinitions,
-              stageLibrary.getServiceDefinitions(),
               false,
               true
           ))
@@ -866,9 +912,10 @@ public class PipelineStoreResource {
       @PathParam("pipelineFragmentTitle") String pipelineFragmentTitle,
       @QueryParam("description") @DefaultValue("") String description,
       @QueryParam("draft") @DefaultValue("true") boolean draft,
+      @QueryParam("executionMode") ExecutionMode executionMode,
       List<StageConfigurationJson> stageConfigurations
   ) throws PipelineException {
-    String pipelineId = pipelineFragmentTitle.replaceAll(PIPELINE_ID_REGEX, "") + UUID.randomUUID().toString();
+    String pipelineId = PipelineConfigurationUtil.generatePipelineId(pipelineFragmentTitle);
     RestAPIUtils.injectPipelineInMDC(pipelineFragmentTitle + "/" + pipelineId);
     PipelineFragmentConfiguration pipelineFragmentConfig = store.createPipelineFragment(
         user,
@@ -877,6 +924,14 @@ public class PipelineStoreResource {
         description,
         draft
     );
+
+    if (executionMode != null) {
+      List<Config> newConfigs = createWithNewConfig(
+          pipelineFragmentConfig.getConfiguration(),
+          ImmutableMap.of("executionMode", new Config("executionMode", executionMode.name()))
+      );
+      pipelineFragmentConfig.setConfiguration(newConfigs);
+    }
 
     if (!CollectionUtils.isEmpty(stageConfigurations)) {
       List<StageConfiguration> stageInstances = BeanHelper.unwrapStageConfigurations(stageConfigurations);
@@ -913,17 +968,20 @@ public class PipelineStoreResource {
 
     PipelineFragmentConfigurationValidator validator = new PipelineFragmentConfigurationValidator(
         stageLibrary,
+        buildInfo,
         pipelineId,
-        pipelineFragmentConfig
+        pipelineFragmentConfig,
+        user,
+        new HashMap<>()
     );
     pipelineFragmentConfig = validator.validateFragment();
 
     if (draft) {
       return Response.created(UriBuilder.fromUri(uri).path(pipelineId).build())
-          .entity(getPipelineFragmentEnvelope(
+          .entity(PipelineConfigurationUtil.getPipelineFragmentEnvelope(
+              stageLibrary,
               pipelineFragmentConfig,
               ruleDefinitions,
-              stageLibrary.getServiceDefinitions(),
               false
           ))
           .build();
@@ -968,6 +1026,7 @@ public class PipelineStoreResource {
       @PathParam("pipelineId") String name,
       @QueryParam("rev") @DefaultValue("0") String rev,
       @QueryParam("description") String description,
+      @QueryParam("encryptCredentials") @DefaultValue("false") boolean encryptCredentials,
       @ApiParam(name="pipeline", required = true) PipelineConfigurationJson pipeline
   ) throws PipelineException {
     if (store.isRemotePipeline(name, rev)) {
@@ -976,9 +1035,16 @@ public class PipelineStoreResource {
     PipelineInfo pipelineInfo = store.getInfo(name);
     RestAPIUtils.injectPipelineInMDC(pipelineInfo.getTitle(), pipelineInfo.getPipelineId());
     PipelineConfiguration pipelineConfig = BeanHelper.unwrapPipelineConfiguration(pipeline);
-    PipelineConfigurationValidator validator = new PipelineConfigurationValidator(stageLibrary, name, pipelineConfig);
+    PipelineConfigurationValidator validator = new PipelineConfigurationValidator(
+        stageLibrary,
+        buildInfo,
+        name,
+        pipelineConfig,
+        user,
+        new HashMap<>()
+    );
     pipelineConfig = validator.validate();
-    pipelineConfig = store.save(user, name, rev, description, pipelineConfig);
+    pipelineConfig = store.save(user, name, rev, description, pipelineConfig, encryptCredentials);
     return Response.ok().entity(BeanHelper.wrapPipelineConfiguration(pipelineConfig)).build();
   }
 
@@ -1038,7 +1104,7 @@ public class PipelineStoreResource {
     if(ruleDefinitions != null) {
       PipelineConfiguration pipelineConfiguration = store.load(pipelineId, rev);
       PipelineConfigBean pipelineConfigBean =  PipelineBeanCreator.get()
-          .create(pipelineConfiguration, new ArrayList<>(), null);
+          .create(pipelineConfiguration, new ArrayList<>(), null, null, null);
       RuleDefinitionValidator ruleDefinitionValidator = new RuleDefinitionValidator(
           pipelineId,
           ruleDefinitions,
@@ -1076,7 +1142,7 @@ public class PipelineStoreResource {
     RuleDefinitions ruleDefs = BeanHelper.unwrapRuleDefinitions(ruleDefinitionsJson);
     PipelineConfiguration pipelineConfiguration = store.load(pipelineId, rev);
     PipelineConfigBean pipelineConfigBean =  PipelineBeanCreator.get()
-        .create(pipelineConfiguration, new ArrayList<>(), null);
+        .create(pipelineConfiguration, new ArrayList<>(), null, null, null);
     RuleDefinitionValidator ruleDefinitionValidator = new RuleDefinitionValidator(
         pipelineId,
         ruleDefs,
@@ -1105,13 +1171,22 @@ public class PipelineStoreResource {
     RestAPIUtils.injectPipelineInMDC(pipelineInfo.getTitle(), pipelineInfo.getPipelineId());
 
     PipelineConfiguration pipelineConfig = store.load(name, rev);
-    PipelineConfigurationValidator validator = new PipelineConfigurationValidator(stageLibrary, name, pipelineConfig);
+    PipelineConfigurationValidator validator = new PipelineConfigurationValidator(
+        stageLibrary,
+        buildInfo,
+        name,
+        pipelineConfig,
+        user,
+        new HashMap<>()
+    );
     pipelineConfig = validator.validate();
     RuleDefinitions ruleDefinitions = store.retrieveRules(name, rev);
-    PipelineEnvelopeJson pipelineEnvelope = getPipelineEnvelope(
+    PipelineEnvelopeJson pipelineEnvelope = PipelineConfigurationUtil.getPipelineEnvelope(
+        stageLibrary,
+        credentialStoresTask,
+        configuration,
         pipelineConfig,
         ruleDefinitions,
-        stageLibrary.getServiceDefinitions(),
         includeLibraryDefinitions,
         includePlainTextCredentials
     );
@@ -1128,188 +1203,6 @@ public class PipelineStoreResource {
     }
   }
 
-  private void fetchStageDefinition(
-      StageConfiguration conf,
-      List<StageDefinition> stageDefinitions,
-      Map<String, String> stageIcons
-  ) {
-    String key = conf.getLibrary() + ":"  + conf.getStageName();
-    if (!stageIcons.containsKey(key)) {
-      StageDefinition stageDefinition = stageLibrary.getStage(conf.getLibrary(),
-          conf.getStageName(), false);
-      if (stageDefinition != null) {
-        stageDefinitions.add(stageDefinition);
-        String iconFile = stageDefinition.getIcon();
-        if (iconFile != null && iconFile.trim().length() > 0) {
-          try(InputStream icon = stageDefinition.getStageClassLoader().getResourceAsStream(iconFile)) {
-            stageIcons.put(key, BaseEncoding.base64().encode(IOUtils.toByteArray(icon)));
-          } catch (Exception e) {
-            LOG.debug("Failed to convert stage icons to Base64 - " + e.getLocalizedMessage());
-            stageIcons.put(key, null);
-          }
-        } else {
-          stageIcons.put(key, null);
-        }
-      }
-    }
-  }
-
-  private PipelineEnvelopeJson getPipelineEnvelope(
-      PipelineConfiguration pipelineConfig,
-      RuleDefinitions ruleDefinitions,
-      List<ServiceDefinition> serviceDefinitions,
-      boolean includeLibraryDefinitions,
-      boolean includePlainTextCredentials
-  ) {
-    if (!includePlainTextCredentials) {
-      PipelineConfigurationUtil.stripPipelineConfigPlainCredentials(pipelineConfig, stageLibrary);
-    }
-    PipelineEnvelopeJson pipelineEnvelope = new PipelineEnvelopeJson();
-    pipelineEnvelope.setPipelineConfig(BeanHelper.wrapPipelineConfiguration(pipelineConfig));
-    pipelineEnvelope.setPipelineRules(BeanHelper.wrapRuleDefinitions(ruleDefinitions));
-    if (includeLibraryDefinitions) {
-      DefinitionsJson definitions = new DefinitionsJson();
-
-      // Add only stage definitions for stages present in pipeline config
-      List<StageDefinition> stageDefinitions = new ArrayList<>();
-      Map<String, String> stageIcons = new HashMap<>();
-
-      for (StageConfiguration conf : pipelineConfig.getOriginalStages()) {
-        fetchStageDefinition(conf, stageDefinitions, stageIcons);
-      }
-
-      // add from fragments
-      if (CollectionUtils.isNotEmpty(pipelineConfig.getFragments())) {
-        pipelineConfig.getFragments().forEach(pipelineFragmentConfiguration -> {
-          for (StageConfiguration conf : pipelineFragmentConfiguration.getOriginalStages()) {
-            fetchStageDefinition(conf, stageDefinitions, stageIcons);
-          }
-        });
-      }
-
-      StageConfiguration errorStageConfig = pipelineConfig.getErrorStage();
-      if (errorStageConfig != null) {
-        fetchStageDefinition(errorStageConfig, stageDefinitions, stageIcons);
-      }
-
-      StageConfiguration originStageConfig = pipelineConfig.getTestOriginStage();
-      if (originStageConfig != null) {
-        fetchStageDefinition(originStageConfig, stageDefinitions, stageIcons);
-      }
-
-      StageConfiguration statsAggregatorStageConfig = pipelineConfig.getStatsAggregatorStage();
-      if (statsAggregatorStageConfig != null) {
-        fetchStageDefinition(statsAggregatorStageConfig, stageDefinitions, stageIcons);
-      }
-
-      for (StageConfiguration startEventStage: pipelineConfig.getStartEventStages()) {
-        fetchStageDefinition(startEventStage, stageDefinitions, stageIcons);
-      }
-
-      for (StageConfiguration stopEventStage: pipelineConfig.getStopEventStages()) {
-        fetchStageDefinition(stopEventStage, stageDefinitions, stageIcons);
-      }
-
-      List<StageDefinitionJson> stages = new ArrayList<>(BeanHelper.wrapStageDefinitions(stageDefinitions));
-      definitions.setStages(stages);
-
-      definitions.setStageIcons(stageIcons);
-
-      List<PipelineDefinitionJson> pipeline = new ArrayList<>(1);
-      pipeline.add(BeanHelper.wrapPipelineDefinition(stageLibrary.getPipeline()));
-      definitions.setPipeline(pipeline);
-
-      List<PipelineRulesDefinitionJson> pipelineRules = new ArrayList<>(1);
-      pipelineRules.add(BeanHelper.wrapPipelineRulesDefinition(stageLibrary.getPipelineRules()));
-      definitions.setPipelineRules(pipelineRules);
-
-
-      Map<Class, ServiceDefinition> serviceByClass = serviceDefinitions.stream()
-          .collect(Collectors.toMap(ServiceDefinition::getProvides, Function.identity()));
-
-      List<ServiceDefinition> pipelineServices = stageDefinitions.stream()
-          .flatMap(stageDefinition -> stageDefinition.getServices().stream())
-          .map(ServiceDependencyDefinition::getService)
-          .distinct()
-          .map(serviceClass -> serviceByClass.get(serviceClass))
-          .filter(Objects::nonNull)
-          .collect(Collectors.toList());
-
-      definitions.setServices(BeanHelper.wrapServiceDefinitions(pipelineServices));
-
-      pipelineEnvelope.setLibraryDefinitions(definitions);
-    }
-
-    return pipelineEnvelope;
-  }
-
-  private PipelineFragmentEnvelopeJson getPipelineFragmentEnvelope(
-      PipelineFragmentConfiguration pipelineFragmentConfig,
-      RuleDefinitions ruleDefinitions,
-      List<ServiceDefinition> serviceDefinitions,
-      boolean includeLibraryDefinitions
-  ) {
-    PipelineFragmentEnvelopeJson pipelineFragmentEnvelope = new PipelineFragmentEnvelopeJson();
-    pipelineFragmentEnvelope.setPipelineFragmentConfig(
-        BeanHelper.wrapPipelineFragmentConfiguration(pipelineFragmentConfig)
-    );
-    pipelineFragmentEnvelope.setPipelineRules(BeanHelper.wrapRuleDefinitions(ruleDefinitions));
-    if (includeLibraryDefinitions) {
-      DefinitionsJson definitions = new DefinitionsJson();
-
-      // Add only stage definitions for stages present in pipeline config
-      List<StageDefinition> stageDefinitions = new ArrayList<>();
-      Map<String, String> stageIcons = new HashMap<>();
-
-      for (StageConfiguration conf : pipelineFragmentConfig.getStages()) {
-        fetchStageDefinition(conf, stageDefinitions, stageIcons);
-      }
-
-      StageConfiguration originStageConfig = pipelineFragmentConfig.getTestOriginStage();
-      if (originStageConfig != null) {
-        fetchStageDefinition(originStageConfig, stageDefinitions, stageIcons);
-      }
-
-      // add from fragments
-      if (CollectionUtils.isNotEmpty(pipelineFragmentConfig.getFragments())) {
-        pipelineFragmentConfig.getFragments().forEach(pipelineFragmentConfiguration -> {
-          for (StageConfiguration conf : pipelineFragmentConfiguration.getOriginalStages()) {
-            fetchStageDefinition(conf, stageDefinitions, stageIcons);
-          }
-        });
-      }
-
-      List<StageDefinitionJson> stages = new ArrayList<>(BeanHelper.wrapStageDefinitions(stageDefinitions));
-      definitions.setStages(stages);
-
-      definitions.setStageIcons(stageIcons);
-
-      List<PipelineFragmentDefinitionJson> pipelineFragment = new ArrayList<>(1);
-      pipelineFragment.add(BeanHelper.wrapPipelineFragmentDefinition(stageLibrary.getPipelineFragment()));
-      definitions.setPipelineFragment(pipelineFragment);
-
-      List<PipelineRulesDefinitionJson> pipelineRules = new ArrayList<>(1);
-      pipelineRules.add(BeanHelper.wrapPipelineRulesDefinition(stageLibrary.getPipelineRules()));
-      definitions.setPipelineRules(pipelineRules);
-
-      Map<Class, ServiceDefinition> serviceByClass = serviceDefinitions.stream()
-          .collect(Collectors.toMap(ServiceDefinition::getProvides, Function.identity()));
-
-      List<ServiceDefinition> pipelineServices = stageDefinitions.stream()
-          .flatMap(stageDefinition -> stageDefinition.getServices().stream())
-          .map(ServiceDependencyDefinition::getService)
-          .distinct()
-          .map(serviceClass -> serviceByClass.get(serviceClass))
-          .filter(Objects::nonNull)
-          .collect(Collectors.toList());
-
-      definitions.setServices(BeanHelper.wrapServiceDefinitions(pipelineServices));
-
-      pipelineFragmentEnvelope.setLibraryDefinitions(definitions);
-    }
-
-    return pipelineFragmentEnvelope;
-  }
 
   @Path("/pipeline/{pipelineId}/import")
   @POST
@@ -1326,6 +1219,7 @@ public class PipelineStoreResource {
       @QueryParam("autoGeneratePipelineId") @DefaultValue("false") boolean autoGeneratePipelineId,
       @QueryParam("draft") @DefaultValue("false") boolean draft,
       @QueryParam("includeLibraryDefinitions") @DefaultValue("true") boolean includeLibraryDefinitions,
+      @QueryParam("encryptCredentials") @DefaultValue("false") boolean encryptCredentials,
       @ApiParam(name="pipelineEnvelope", required = true) PipelineEnvelopeJson pipelineEnvelope
   ) throws PipelineException {
     RestAPIUtils.injectPipelineInMDC("*");
@@ -1336,7 +1230,8 @@ public class PipelineStoreResource {
         autoGeneratePipelineId,
         pipelineEnvelope,
         draft,
-        includeLibraryDefinitions
+        includeLibraryDefinitions,
+        encryptCredentials
     );
     return Response.ok().
         type(MediaType.APPLICATION_JSON).entity(pipelineEnvelope).build();
@@ -1358,7 +1253,8 @@ public class PipelineStoreResource {
       @QueryParam("overwrite") @DefaultValue("false") boolean overwrite,
       @QueryParam("autoGeneratePipelineId") @DefaultValue("false") boolean autoGeneratePipelineId,
       @QueryParam("draft") @DefaultValue("false") boolean draft,
-      @QueryParam("includeLibraryDefinitions") @DefaultValue("true") boolean includeLibraryDefinitions
+      @QueryParam("includeLibraryDefinitions") @DefaultValue("true") boolean includeLibraryDefinitions,
+      @QueryParam("encryptCredentials") @DefaultValue("false") boolean encryptCredentials
   ) throws PipelineException, IOException {
     RestAPIUtils.injectPipelineInMDC("*");
     PipelineEnvelopeJson pipelineEnvelope = getPipelineEnvelopeFromFromUrl(pipelineHttpUrl);
@@ -1369,7 +1265,8 @@ public class PipelineStoreResource {
         autoGeneratePipelineId,
         pipelineEnvelope,
         draft,
-        includeLibraryDefinitions
+        includeLibraryDefinitions,
+        encryptCredentials
     );
     return Response.ok().
         type(MediaType.APPLICATION_JSON).entity(pipelineEnvelope).build();
@@ -1424,12 +1321,20 @@ public class PipelineStoreResource {
       boolean autoGeneratePipelineId,
       PipelineEnvelopeJson pipelineEnvelope,
       boolean draft,
-      boolean includeLibraryDefinitions
+      boolean includeLibraryDefinitions,
+      boolean encryptCredentials
   ) throws PipelineException {
     PipelineConfigurationJson pipelineConfigurationJson = pipelineEnvelope.getPipelineConfig();
     PipelineConfiguration pipelineConfig = BeanHelper.unwrapPipelineConfiguration(pipelineConfigurationJson);
 
-    PipelineConfigurationValidator validator = new PipelineConfigurationValidator(stageLibrary, name, pipelineConfig);
+    PipelineConfigurationValidator validator = new PipelineConfigurationValidator(
+        stageLibrary,
+        buildInfo,
+        name,
+        pipelineConfig,
+        user,
+        new HashMap<>()
+    );
     pipelineConfig = validator.validate();
 
     RuleDefinitionsJson ruleDefinitionsJson = pipelineEnvelope.getPipelineRules();
@@ -1444,11 +1349,11 @@ public class PipelineStoreResource {
     }
 
     if (overwrite) {
-      if (store.hasPipeline(name)) {
+      if (!draft && store.hasPipeline(name)) {
         newPipelineConfig = store.load(name, rev);
       } else {
         if (autoGeneratePipelineId) {
-          name = label.replaceAll(PIPELINE_ID_REGEX, "") + UUID.randomUUID().toString();
+          name = PipelineConfigurationUtil.generatePipelineId(label);
         }
         newPipelineConfig = store.create(user, name, label, pipelineConfig.getDescription(), false, draft,
             new HashMap<String, Object>()
@@ -1456,10 +1361,10 @@ public class PipelineStoreResource {
       }
     } else {
       if (autoGeneratePipelineId) {
-        name = label.replaceAll(PIPELINE_ID_REGEX, "") + UUID.randomUUID().toString();
+        name = PipelineConfigurationUtil.generatePipelineId(label);
       }
       newPipelineConfig = store.create(user, name, label, pipelineConfig.getDescription(), false, draft,
-          new HashMap<String, Object>()
+          new HashMap<>()
       );
     }
 
@@ -1469,11 +1374,11 @@ public class PipelineStoreResource {
       pipelineConfig.setTitle(label);
       pipelineConfig.setUuid(newPipelineConfig.getUuid());
       pipelineConfig.setPipelineId(newPipelineConfig.getPipelineId());
-      pipelineConfig = store.save(user, name, rev, pipelineConfig.getDescription(), pipelineConfig);
+      pipelineConfig = store.save(user, name, rev, pipelineConfig.getDescription(), pipelineConfig, encryptCredentials);
     }
 
     PipelineConfigBean pipelineConfigBean =  PipelineBeanCreator.get()
-        .create(pipelineConfig, new ArrayList<>(), null);
+        .create(pipelineConfig, new ArrayList<>(), null, null, null);
     RuleDefinitionValidator ruleDefinitionValidator = new RuleDefinitionValidator(
         name,
         ruleDefinitions,
@@ -1485,10 +1390,12 @@ public class PipelineStoreResource {
       ruleDefinitions = store.storeRules(name, rev, ruleDefinitions, false);
     }
 
-    return getPipelineEnvelope(
+    return PipelineConfigurationUtil.getPipelineEnvelope(
+        stageLibrary,
+        credentialStoresTask,
+        configuration,
         pipelineConfig,
         ruleDefinitions,
-        stageLibrary.getServiceDefinitions(),
         includeLibraryDefinitions,
         true
     );
@@ -1526,8 +1433,11 @@ public class PipelineStoreResource {
 
     PipelineFragmentConfigurationValidator validator = new PipelineFragmentConfigurationValidator(
         stageLibrary,
+        buildInfo,
         fragmentId,
-        fragmentConfig
+        fragmentConfig,
+        user,
+        new HashMap<>()
     );
     fragmentConfig = validator.validateFragment();
 
@@ -1541,10 +1451,10 @@ public class PipelineStoreResource {
     );
     ruleDefinitionValidator.validateRuleDefinition();
 
-    return getPipelineFragmentEnvelope(
+    return PipelineConfigurationUtil.getPipelineFragmentEnvelope(
+        stageLibrary,
         fragmentConfig,
         ruleDefinitions,
-        stageLibrary.getServiceDefinitions(),
         includeLibraryDefinitions
     );
   }
@@ -1582,10 +1492,16 @@ public class PipelineStoreResource {
 
         metadata.put("labels", metaLabels);
         RestAPIUtils.injectPipelineInMDC(pipelineConfig.getInfo().getTitle(), pipelineId);
-        PipelineConfigurationValidator validator = new PipelineConfigurationValidator(stageLibrary, pipelineId,
-            pipelineConfig);
+        PipelineConfigurationValidator validator = new PipelineConfigurationValidator(
+            stageLibrary,
+            buildInfo,
+            pipelineId,
+            pipelineConfig,
+            user,
+            new HashMap<>()
+        );
         pipelineConfig = validator.validate();
-        store.save(user, pipelineId, "0", pipelineConfig.getDescription(), pipelineConfig);
+        store.save(user, pipelineId, "0", pipelineConfig.getDescription(), pipelineConfig, false);
         successEntities.add(pipelineId);
 
       } catch (Exception ex) {
@@ -1625,7 +1541,7 @@ public class PipelineStoreResource {
     for (String pipelineId: pipelineIdArr) {
       PipelineConfiguration pipelineConfiguration = store.load(pipelineId, "0");
       PipelineConfigBean pipelineConfigBean =  PipelineBeanCreator.get()
-          .create(pipelineConfiguration, new ArrayList<>(), null);
+          .create(pipelineConfiguration, new ArrayList<>(), null, null, null);
       if (!pipelineConfigBean.executionMode.equals(ExecutionMode.EDGE)) {
         throw new PipelineException(ContainerError.CONTAINER_01600, pipelineConfigBean.executionMode);
       }
@@ -1689,8 +1605,11 @@ public class PipelineStoreResource {
 
           PipelineConfigurationValidator validator = new PipelineConfigurationValidator(
               stageLibrary,
+              buildInfo,
               pipelineConfig.getPipelineId(),
-              pipelineConfig
+              pipelineConfig,
+              user,
+              new HashMap<>()
           );
           pipelineConfig = validator.validate();
 
@@ -1700,7 +1619,7 @@ public class PipelineStoreResource {
               pipelineConfig.getTitle(),
               pipelineConfig.getDescription(),
               false,
-              false, new HashMap<String, Object>()
+              false, new HashMap<>()
           );
 
           pipelineConfig.setUuid(newPipelineConfig.getUuid());
@@ -1711,7 +1630,8 @@ public class PipelineStoreResource {
               pipelineConfig.getPipelineId(),
               pipelineInfo.getLastRev(),
               pipelineConfig.getDescription(),
-              pipelineConfig
+              pipelineConfig,
+              false
           );
 
           successEntities.add(BeanHelper.wrapPipelineInfo(pipelineConfig.getInfo()));
@@ -1730,14 +1650,10 @@ public class PipelineStoreResource {
 
   }
 
-  public List<Config> createWithNewConfig(List<Config> configs, Config replacement) {
+  private List<Config> createWithNewConfig(List<Config> configs, Map<String, Config> replacement) {
     List<Config> newConfigurations = new ArrayList<>();
     for (Config candidate : configs) {
-      if (replacement.getName().equals(candidate.getName())) {
-        newConfigurations.add(replacement);
-      } else {
-        newConfigurations.add(candidate);
-      }
+      newConfigurations.add(replacement.getOrDefault(candidate.getName(), candidate));
     }
     return newConfigurations;
   }
@@ -1754,7 +1670,7 @@ public class PipelineStoreResource {
   @RolesAllowed({
       AuthzRole.CREATOR, AuthzRole.ADMIN, AuthzRole.CREATOR_REMOTE, AuthzRole.ADMIN_REMOTE
   })
-  public Response createDetachedStageEnvelope() throws PipelineException {
+  public Response createDetachedStageEnvelope() {
     DetachedStageConfigurationJson detachedStage = new DetachedStageConfigurationJson(new DetachedStageConfiguration());
     return Response.ok().entity(detachedStage).build();
   }
@@ -1772,9 +1688,66 @@ public class PipelineStoreResource {
   })
   public Response validateDetachedStage(
       @ApiParam(name="stage", required = true) DetachedStageConfigurationJson detachedStage
-  ) throws PipelineException {
+  ) {
     DetachedStageConfiguration stageConf = detachedStage.getDetachedStageConfiguration();
     DetachedStageValidator validator = new DetachedStageValidator(stageLibrary, stageConf);
     return Response.ok().entity(new DetachedStageConfigurationJson(validator.validate())).build();
+  }
+
+  @Path("/detachedconnection")
+  @POST
+  @ApiOperation(value = "Validates given detached connection and performs any necessary upgrade.",
+    response = DetachedConnectionConfigurationJson.class,
+    authorizations = @Authorization(value = "basic")
+  )
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @RolesAllowed({
+      AuthzRole.CREATOR, AuthzRole.ADMIN, AuthzRole.CREATOR_REMOTE, AuthzRole.ADMIN_REMOTE
+  })
+  public Response validateDetachedConnection(
+      @ApiParam(name="connection", required = true) DetachedConnectionConfigurationJson detachedConnection,
+      @QueryParam("forceUpgrade") @DefaultValue("false") final boolean forceUpgrade
+  ) {
+    DetachedConnectionConfiguration connectionConf = detachedConnection.getDetachedConnectionConfiguration();
+    DetachedConnectionValidator validator = new DetachedConnectionValidator(stageLibrary, connectionConf);
+    DetachedConnectionConfiguration detachedConnConf = validator.validate(forceUpgrade);
+    return Response.ok().entity(new DetachedConnectionConfigurationJson(detachedConnConf)).build();
+  }
+
+  private void setStreamingModeDefaults(PipelineConfiguration pipelineConfig) {
+    List<Map<String, String>> maxExecutorConfigsDefault = new ArrayList<>();
+    int maxExecutors = ActivationUtil.getMaxExecutors(activation);
+    if (maxExecutors > 0) {
+      Map<String, String> sparkConfigs = ImmutableMap.of(
+          "key",
+          "spark.dynamicAllocation.maxExecutors",
+          "value",
+          String.valueOf(maxExecutors)
+      );
+      maxExecutorConfigsDefault.add(sparkConfigs);
+    }
+
+    List<Map<String, String>> sparkConfigsDefault = ImmutableList.<Map<String, String>>builder()
+        .add(ImmutableMap.of("key", "spark.driver.memory", "value", "2G"))
+        .add(ImmutableMap.of("key", "spark.driver.cores", "value","1"))
+        .add(ImmutableMap.of("key", "spark.executor.memory", "value","2G"))
+        .add(ImmutableMap.of("key", "spark.executor.cores", "value","1"))
+        .add(ImmutableMap.of("key", "spark.dynamicAllocation.enabled", "value", "true"))
+        .add(ImmutableMap.of("key", "spark.shuffle.service.enabled", "value", "true"))
+        .add(ImmutableMap.of("key", "spark.dynamicAllocation.minExecutors", "value", "1"))
+        .addAll(maxExecutorConfigsDefault)
+        .build();
+    Map<String, Config> replacementConfigs = ImmutableMap.<String, Config>builder()
+        .put("executionMode", new Config("executionMode", ExecutionMode.BATCH.name()))
+        .put("sparkConfigs", new Config("sparkConfigs", sparkConfigsDefault))
+        .put("logLevel", new Config("logLevel", "ERROR"))
+        .put(
+            "statsAggregatorStage",
+            new Config("statsAggregatorStage", PipelineConfigBean.STREAMING_STATS_DPM_DIRECTLY_TARGET)
+        )
+        .build();
+    List<Config> newConfigs = createWithNewConfig(pipelineConfig.getConfiguration(), replacementConfigs);
+    pipelineConfig.setConfiguration(newConfigs);
   }
 }

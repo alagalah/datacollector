@@ -22,7 +22,7 @@ import com.streamsets.pipeline.api.HideConfigs;
 import com.streamsets.pipeline.api.PushSource;
 import com.streamsets.pipeline.api.StageDef;
 import com.streamsets.pipeline.api.base.configurablestage.DPushSource;
-import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
+import com.streamsets.pipeline.lib.jdbc.BrandedHikariPoolConfigBean;
 import com.streamsets.pipeline.stage.origin.jdbc.CommonSourceConfigBean;
 import com.streamsets.pipeline.stage.origin.jdbc.table.QuoteChar;
 import com.streamsets.pipeline.stage.origin.jdbc.table.TableJdbcConfigBean;
@@ -34,7 +34,9 @@ import com.streamsets.pipeline.stage.origin.jdbc.table.TableJdbcConfigBean;
     icon = "sql-server-multithreaded.png",
     resetOffset = true,
     producesEvents = true,
+    recordsByRef = true,
     upgrader = SQLServerCTSourceUpgrader.class,
+    upgraderDef = "upgrader/SQLServerCTDSource.yaml",
     onlineHelpRefUrl ="index.html?contextID=task_vsh_22s_r1b"
 )
 @GenerateResourceBundle
@@ -47,7 +49,7 @@ import com.streamsets.pipeline.stage.origin.jdbc.table.TableJdbcConfigBean;
 public class SQLServerCTDSource extends DPushSource {
 
   @ConfigDefBean
-  public HikariPoolConfigBean hikariConf = new HikariPoolConfigBean();
+  public BrandedHikariPoolConfigBean hikariConf = new BrandedHikariPoolConfigBean();
 
   @ConfigDefBean
   public CommonSourceConfigBean commonSourceConfigBean = new CommonSourceConfigBean();
@@ -65,6 +67,7 @@ public class SQLServerCTDSource extends DPushSource {
     tableJdbcConfigBean.batchTableStrategy = ctTableJdbcConfigBean.batchTableStrategy;
     tableJdbcConfigBean.timeZoneID = ctTableJdbcConfigBean.timeZoneID;
     tableJdbcConfigBean.quoteChar = QuoteChar.NONE;
+    tableJdbcConfigBean.unknownTypeAction = ctTableJdbcConfigBean.unknownTypeAction;
     tableJdbcConfigBean.numberOfThreads = ctTableJdbcConfigBean.numberOfThreads;
     tableJdbcConfigBean.tableOrderStrategy = ctTableJdbcConfigBean.tableOrderStrategy;
 

@@ -23,12 +23,12 @@
   <parent>
     <groupId>com.streamsets</groupId>
     <artifactId>streamsets-datacollector-root-proto</artifactId>
-    <version>3.10.0-SNAPSHOT</version>
+    <version>3.19.0-SNAPSHOT</version>
     <relativePath>../root-proto</relativePath>
   </parent>
   <groupId>com.streamsets</groupId>
   <artifactId>streamsets-datacollector-root</artifactId>
-  <version>3.10.0-SNAPSHOT</version>
+  <version>3.19.0-SNAPSHOT</version>
   <description>StreamSets Data Collector Root POM</description>
   <name>StreamSets Data Collector Root POM</name>
   <packaging>pom</packaging>
@@ -63,7 +63,7 @@
     <commons-codec.version>1.10</commons-codec.version>
     <commons-compress.version>1.18</commons-compress.version>
     <commons-configuration.version>2.0</commons-configuration.version>
-    <commons-csv.version>1.5</commons-csv.version>
+    <commons-csv.version>1.8</commons-csv.version>
     <commons-el.version>1.0</commons-el.version>
     <commons-io.version>2.4</commons-io.version>
     <commons-pool.version>2.4.1</commons-pool.version>
@@ -77,7 +77,7 @@
     <javax.inject.version>1</javax.inject.version>
     <javax.mail.version>1.4.7</javax.mail.version>
     <jax-ws.version>2.1.1</jax-ws.version>
-    <jetty.version>9.4.12.v20180830</jetty.version>
+    <jetty.version>9.4.22.v20191022</jetty.version>
     <jodatime.version>2.3</jodatime.version>
     <jps-api.version>2.0</jps-api.version>
     <jtar.version>2.2</jtar.version>
@@ -117,6 +117,11 @@
       </dependency>
       <dependency>
         <groupId>com.streamsets</groupId>
+        <artifactId>streamsets-datacollector-upgrader</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.streamsets</groupId>
         <artifactId>streamsets-datacollector-container-common</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -138,6 +143,11 @@
       <dependency>
         <groupId>com.streamsets</groupId>
         <artifactId>streamsets-datacollector-container</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.streamsets</groupId>
+        <artifactId>streamsets-datacollector-metadata-generator</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -318,11 +328,6 @@
       <dependency>
         <groupId>com.streamsets</groupId>
         <artifactId>streamsets-datacollector-hdp_2_6-flume-lib</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.streamsets</groupId>
-        <artifactId>streamsets-datacollector-mapr_5_0-lib</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -524,16 +529,6 @@
       </dependency>
       <dependency>
         <groupId>com.streamsets</groupId>
-        <artifactId>streamsets-datacollector-mapr_5_1-lib</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.streamsets</groupId>
-        <artifactId>streamsets-datacollector-mapr_5_2-lib</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.streamsets</groupId>
         <artifactId>streamsets-datacollector-ui</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -613,6 +608,11 @@
       <dependency>
         <groupId>io.dropwizard.metrics</groupId>
         <artifactId>metrics-json</artifactId>
+        <version>${metrics.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.dropwizard.metrics</groupId>
+        <artifactId>metrics-jetty9</artifactId>
         <version>${metrics.version}</version>
       </dependency>
       <dependency>
@@ -808,6 +808,12 @@
         <groupId>fr.xebia.extras</groupId>
         <artifactId>selma</artifactId>
         <version>${selma.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>com.amazonaws</groupId>
+        <artifactId>aws-java-sdk-s3</artifactId>
+        <version>${aws.sdk.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

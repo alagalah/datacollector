@@ -16,12 +16,15 @@
 package com.streamsets.datacollector.restapi;
 
 import com.google.common.collect.ImmutableList;
+import com.streamsets.datacollector.activation.Activation;
 import com.streamsets.datacollector.config.PipelineConfiguration;
 import com.streamsets.datacollector.creation.RuleDefinitionsConfigBean;
+import com.streamsets.datacollector.credential.CredentialStoresTask;
 import com.streamsets.datacollector.execution.Manager;
 import com.streamsets.datacollector.execution.PipelineState;
 import com.streamsets.datacollector.execution.PipelineStatus;
 import com.streamsets.datacollector.execution.manager.PipelineStateImpl;
+import com.streamsets.datacollector.main.BuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.main.UserGroupManager;
 import com.streamsets.datacollector.restapi.bean.BeanHelper;
@@ -40,6 +43,7 @@ import com.streamsets.datacollector.restapi.bean.PipelineStateJson;
 import com.streamsets.datacollector.restapi.bean.RuleDefinitionsJson;
 import com.streamsets.datacollector.restapi.bean.StageConfigurationJson;
 import com.streamsets.datacollector.restapi.bean.ThresholdTypeJson;
+import com.streamsets.datacollector.restapi.bean.UserJson;
 import com.streamsets.datacollector.runner.MockStages;
 import com.streamsets.datacollector.stagelibrary.StageLibraryTask;
 import com.streamsets.datacollector.store.AclStoreTask;
@@ -47,6 +51,7 @@ import com.streamsets.datacollector.store.PipelineInfo;
 import com.streamsets.datacollector.store.PipelineStoreException;
 import com.streamsets.datacollector.store.PipelineStoreTask;
 import com.streamsets.datacollector.store.impl.FileAclStoreTask;
+import com.streamsets.datacollector.util.Configuration;
 import com.streamsets.datacollector.util.ContainerError;
 import com.streamsets.datacollector.util.LockCache;
 import com.streamsets.datacollector.util.PipelineException;
@@ -66,6 +71,7 @@ import org.glassfish.jersey.test.JerseyTest;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Matchers;
 import org.mockito.Mockito;
 import org.slf4j.Logger;
@@ -84,6 +90,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public class TestPipelineStoreResource extends JerseyTest {
@@ -411,6 +418,37 @@ public class TestPipelineStoreResource extends JerseyTest {
   }
 
   @Test
+  public void testSaveWithCredentials() throws Exception {
+    PipelineConfiguration toSave = MockStages.createPipelineConfigurationSourceProcessorTarget();
+    Response response = target("/v1/pipeline/myPipeline")
+        .queryParam("tag", "tag")
+        .queryParam("tagDescription", "tagDescription").request()
+        .post(Entity.json(BeanHelper.wrapPipelineConfiguration(toSave)));
+
+    PipelineConfigurationJson returned = response.readEntity(PipelineConfigurationJson.class);
+    Assert.assertNotNull(returned);
+    Assert.assertEquals(200, response.getStatus());
+    Assert.assertEquals(toSave.getDescription(), returned.getDescription());
+
+
+    response = target("/v1/pipeline/readWriteOnly")
+        .queryParam("tag", "tag")
+        .queryParam("tagDescription", "tagDescription")
+        .queryParam("encryptCredentials", true)
+        .request()
+        .post(Entity.json(BeanHelper.wrapPipelineConfiguration(toSave)));
+
+    Mockito.verify(pipelineStore).save(
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.any(PipelineConfiguration.class),
+        Mockito.eq(true)
+    );
+  }
+
+  @Test
   public void testSaveRules() {
 
     long timestamp = System.currentTimeMillis();
@@ -502,8 +540,12 @@ public class TestPipelineStoreResource extends JerseyTest {
       bindFactory(TestUtil.PrincipalTestInjector.class).to(Principal.class);
       bindFactory(TestUtil.URITestInjector.class).to(URI.class);
       bindFactory(RuntimeInfoTestInjector.class).to(RuntimeInfo.class);
+      bindFactory(BuildInfoTestInjector.class).to(BuildInfo.class);
       bindFactory(ManagerTestInjector.class).to(Manager.class);
       bindFactory(TestUtil.UserGroupManagerTestInjector.class).to(UserGroupManager.class);
+      bindFactory(TestUtil.CredentialStoreTaskTestInjector.class).to(CredentialStoresTask.class);
+      bindFactory(ConfigurationTestInjector.class).to(Configuration.class);
+      bindFactory(ActivationTestInjector.class).to(Activation.class);
     }
   }
 
@@ -681,14 +723,29 @@ public class TestPipelineStoreResource extends JerseyTest {
         Mockito.doNothing().when(pipelineStore).delete("myPipeline");
         Mockito.doThrow(new PipelineStoreException(ContainerError.CONTAINER_0200, "xyz"))
             .when(pipelineStore).delete("xyz");
-        Mockito.when(pipelineStore.save(
-            Matchers.anyString(), Matchers.anyString(), Matchers.anyString(), Matchers.anyString(),
-            (com.streamsets.datacollector.config.PipelineConfiguration)Matchers.any())).thenReturn(
-          MockStages.createPipelineConfigurationSourceProcessorTarget());
-        Mockito.when(pipelineStore.save(
-            Matchers.anyString(), Matchers.matches("abc|def"), Matchers.matches("0"), Matchers.anyString(),
-            (com.streamsets.datacollector.config.PipelineConfiguration)Matchers.any())).thenReturn(
-            MockStages.createPipelineConfigurationWithLabels(Arrays.asList("foo", "bar")));
+        Mockito.when(
+            pipelineStore.save(
+                Matchers.anyString(),
+                Matchers.anyString(),
+                Matchers.anyString(),
+                Matchers.anyString(),
+                Matchers.any(),
+                Matchers.anyBoolean()
+            )
+        ).thenReturn(MockStages.createPipelineConfigurationSourceProcessorTarget());
+
+        Mockito.when(
+            pipelineStore.save(
+                Matchers.anyString(),
+                Matchers.matches("abc|def"),
+                Matchers.matches("0"),
+                Matchers.anyString(),
+                Matchers.any(),
+                Matchers.anyBoolean()
+            )
+        ).thenReturn(
+            MockStages.createPipelineConfigurationWithLabels(Arrays.asList("foo", "bar"))
+        );
 
         List<MetricsRuleDefinitionJson> metricsRuleDefinitionJsons = new ArrayList<>();
         metricsRuleDefinitionJsons.add(new MetricsRuleDefinitionJson("m1", "m1", "a", MetricTypeJson.COUNTER,
@@ -765,12 +822,17 @@ public class TestPipelineStoreResource extends JerseyTest {
     @Singleton
     @Override
     public AclStoreTask provide() {
-      aclStore = new FileAclStoreTask (
+      aclStore = Mockito.spy(new FileAclStoreTask (
           Mockito.mock(RuntimeInfo.class),
           pipelineStore,
           new LockCache<String>(),
           Mockito.mock(UserGroupManager.class)
       )  {
+
+        @Override
+        public boolean isPermissionGranted(String pipelineName, Set<Action> actions, UserJson currentUser) throws PipelineException {
+          return super.isPermissionGranted(pipelineName, actions, currentUser);
+        }
 
         @Override
         public Acl saveAcl(String pipelineName, Acl acl) throws PipelineStoreException {
@@ -862,10 +924,9 @@ public class TestPipelineStoreResource extends JerseyTest {
             case "def":
               return user1Acl;
           }
-
           return null;
         }
-      };
+      });
 
       return aclStore;
     }
@@ -891,6 +952,19 @@ public class TestPipelineStoreResource extends JerseyTest {
     }
   }
 
+  public static class BuildInfoTestInjector implements Factory<BuildInfo> {
+    @Singleton
+    @Override
+    public BuildInfo provide() {
+      BuildInfo buildInfo = Mockito.mock(BuildInfo.class);
+      Mockito.when(buildInfo.getVersion()).thenReturn("3.17.0");
+      return buildInfo;
+    }
+
+    @Override
+    public void dispose(BuildInfo buildInfo) {
+    }
+  }
 
   static Manager manager;
 
@@ -1006,9 +1080,10 @@ public class TestPipelineStoreResource extends JerseyTest {
   }
 
   @Test
-  public void testImportPipeline() {
+  public void testImportPipeline() throws Exception {
     Response response = target("/v1/pipeline/xyz/export").queryParam("rev", "1").request().get();
     PipelineEnvelopeJson pipelineEnvelope = response.readEntity(PipelineEnvelopeJson.class);
+    ArgumentCaptor<Boolean> encryptCredentialsArgumentCaptor = ArgumentCaptor.forClass(Boolean.class);
 
     response = target("/v1/pipeline/newFromImport/import")
         .queryParam("rev", "1")
@@ -1020,6 +1095,41 @@ public class TestPipelineStoreResource extends JerseyTest {
     Assert.assertNotNull(pipelineEnvelope.getPipelineConfig());
     Assert.assertNotNull(pipelineEnvelope.getPipelineRules());
     Assert.assertNull(pipelineEnvelope.getLibraryDefinitions());
+    Mockito.verify(pipelineStore).save(
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.any(),
+        encryptCredentialsArgumentCaptor.capture()
+    );
+    Assert.assertFalse(encryptCredentialsArgumentCaptor.getValue());
+  }
+
+  @Test
+  public void testImportPipelineWithPipelineCredentials() throws Exception {
+    Response response = target("/v1/pipeline/xyz/export").queryParam("rev", "1").request().get();
+    PipelineEnvelopeJson pipelineEnvelope = response.readEntity(PipelineEnvelopeJson.class);
+    ArgumentCaptor<Boolean> encryptCredentialsArgumentCaptor = ArgumentCaptor.forClass(Boolean.class);
+
+    response = target("/v1/pipeline/newFromImport/import").queryParam("rev", "1")
+        .queryParam("encryptCredentials", true)
+        .request()
+        .post(Entity.json(pipelineEnvelope));
+    pipelineEnvelope = response.readEntity(PipelineEnvelopeJson.class);
+
+    Assert.assertNotNull(pipelineEnvelope);
+    Assert.assertNotNull(pipelineEnvelope.getPipelineConfig());
+    Assert.assertNotNull(pipelineEnvelope.getPipelineRules());
+    Assert.assertNull(pipelineEnvelope.getLibraryDefinitions());
+    Mockito.verify(pipelineStore).save(
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.anyString(),
+        Mockito.any(),
+        Mockito.eq(true)
+    );
   }
 
   @Test

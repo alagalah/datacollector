@@ -36,6 +36,7 @@ import com.streamsets.pipeline.stage.origin.jdbc.cdc.sqlserver.CDCTableConfigBea
 import com.streamsets.pipeline.stage.origin.jdbc.table.PartitioningMode;
 import com.streamsets.pipeline.stage.origin.jdbc.table.QuoteChar;
 import com.streamsets.pipeline.stage.origin.jdbc.table.TableConfigBean;
+import com.streamsets.pipeline.stage.origin.jdbc.table.TableConfigBeanImpl;
 import com.streamsets.pipeline.stage.origin.jdbc.table.TableJdbcConfigBean;
 import com.streamsets.pipeline.stage.origin.jdbc.table.TableJdbcELEvalContext;
 import com.streamsets.pipeline.lib.jdbc.multithread.util.OffsetQueryUtil;
@@ -54,6 +55,7 @@ import java.sql.Types;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,8 +75,11 @@ public class TableContextUtil {
   public static final String GENERIC_PARTITION_SIZE_GT_ZERO_MSG = "partition size must be greater than zero";
   public static final String SQL_SERVER_CDC_TABLE_SUFFIX = "_CT";
 
+  public static final int TYPE_ORACLE_BINARY_FLOAT = 100;
+  public static final int TYPE_ORACLE_BINARY_DOUBLE = 101;
   public static final int TYPE_ORACLE_TIMESTAMP_WITH_TIME_ZONE = -101;
   public static final int TYPE_ORACLE_TIMESTAMP_WITH_LOCAL_TIME_ZONE = -102;
+  public static final int TYPE_SQL_SERVER_DATETIMEOFFSET = -155;
 
   public static final String OFFSET_VALUE_NANO_SEPARATOR = "<n>";
   public static final String TIMESTAMP_NANOS_PATTERN = "^[0-9]+" + OFFSET_VALUE_NANO_SEPARATOR + "[0-9]+$";
@@ -94,14 +99,17 @@ public class TableContextUtil {
     .add(Types.NUMERIC)
     .build();
 
-  public static final Map<DatabaseVendor, Set<Integer>> VENDOR_PARTITIONABLE_TYPES = ImmutableMap.<DatabaseVendor, Set<Integer>>builder()
+  public static final Map<DatabaseVendor, Set<Integer>> VENDOR_PARTITIONABLE_TYPES = ImmutableMap.<DatabaseVendor, Set<Integer>> builder()
     .put(DatabaseVendor.ORACLE, ImmutableSet.of(
       TYPE_ORACLE_TIMESTAMP_WITH_TIME_ZONE,
       TYPE_ORACLE_TIMESTAMP_WITH_LOCAL_TIME_ZONE
     ))
+    .put(DatabaseVendor.SQL_SERVER, ImmutableSet.of(
+      TYPE_SQL_SERVER_DATETIMEOFFSET
+    ))
     .build();
 
-  private JdbcUtil jdbcUtil;
+  protected JdbcUtil jdbcUtil;
 
   public TableContextUtil() {
     this(UtilsProvider.getJdbcUtil());
@@ -115,7 +123,7 @@ public class TableContextUtil {
     return jdbcUtil;
   }
 
-  private Map<String, Integer> getColumnNameType(Connection connection, String schema, String tableName) throws SQLException {
+  protected Map<String, Integer> getColumnNameType(Connection connection, String schema, String tableName) throws SQLException {
     Map<String, Integer> columnNameToType = new LinkedHashMap<>();
     try (ResultSet rs = jdbcUtil.getColumnMetadata(connection, schema, tableName)) {
       while (rs.next()) {
@@ -144,6 +152,11 @@ public class TableContextUtil {
         switch (jdbcType) {
           case TYPE_ORACLE_TIMESTAMP_WITH_TIME_ZONE: return "TIMESTAMP WITH TIME ZONE";
           case TYPE_ORACLE_TIMESTAMP_WITH_LOCAL_TIME_ZONE: return "TIMESTAMP WITH LOCAL TIME ZONE";
+        }
+        break;
+      case SQL_SERVER:
+        switch (jdbcType) {
+          case TYPE_SQL_SERVER_DATETIMEOFFSET: return "SQLSERVER DATETIMEOFFSET";
         }
         break;
     }
@@ -184,9 +197,15 @@ public class TableContextUtil {
    * @return qualified table name if schema is not null and tableName alone if schema is null.
    */
   public static String getQuotedQualifiedTableName(String schema, String tableName, String qC) {
-    String quotedTableName = String.format(OffsetQueryUtil.QUOTED_NAME, qC, tableName, qC);
-    return StringUtils.isEmpty(schema) ?
-        quotedTableName: String.format(OffsetQueryUtil.QUOTED_NAME, qC, schema, qC)  + "." + quotedTableName ;
+    String quotedTableName = getQuotedObjectName(tableName, qC);
+    return StringUtils.isEmpty(schema) ? quotedTableName : getQuotedObjectName(schema, qC) + "." + quotedTableName;
+  }
+
+  /**
+   * Quote given object name (column, table name)
+   */
+  public static String getQuotedObjectName(String objectName, String qC) {
+    return String.format(OffsetQueryUtil.QUOTED_NAME, qC, objectName, qC);
   }
 
   private TableContext createTableContext(
@@ -206,8 +225,8 @@ public class TableContextUtil {
     Map<String, Integer> columnNameToType = getColumnNameType(connection, schemaName, tableName);
     Map<String, String> offsetColumnToStartOffset = new HashMap<>();
 
-    if (tableConfigBean.overrideDefaultOffsetColumns) {
-      if (tableConfigBean.offsetColumns.isEmpty()) {
+    if (tableConfigBean.isOverrideDefaultOffsetColumns()) {
+      if (tableConfigBean.getOffsetColumns().isEmpty()) {
         issues.add(context.createConfigIssue(
             Groups.TABLE.name(),
             TableJdbcConfigBean.TABLE_CONFIG,
@@ -216,7 +235,7 @@ public class TableContextUtil {
         ));
         return null;
       }
-      for (String overridenPartitionColumn : tableConfigBean.offsetColumns) {
+      for (String overridenPartitionColumn : tableConfigBean.getOffsetColumns()) {
         if (!columnNameToType.containsKey(overridenPartitionColumn)) {
           issues.add(context.createConfigIssue(
               Groups.TABLE.name(),
@@ -231,7 +250,7 @@ public class TableContextUtil {
       }
     } else {
       List<String> primaryKeys = jdbcUtil.getPrimaryKeys(connection, schemaName, tableName);
-      if (primaryKeys.isEmpty() && !tableConfigBean.enableNonIncremental) {
+      if (primaryKeys.isEmpty() && !tableConfigBean.isEnableNonIncremental()) {
         issues.add(context.createConfigIssue(
             Groups.TABLE.name(),
             TableJdbcConfigBean.TABLE_CONFIG,
@@ -247,7 +266,7 @@ public class TableContextUtil {
 
     final Map<String, String> offsetColumnMinValues = new HashMap<>();
     final Map<String, String> offsetColumnMaxValues = new HashMap<>();
-    if (tableConfigBean.partitioningMode != PartitioningMode.DISABLED) {
+    if (tableConfigBean.getPartitioningMode() != PartitioningMode.DISABLED) {
       offsetColumnMinValues.putAll(jdbcUtil.getMinimumOffsetValues(
           vendor,
           connection,
@@ -267,11 +286,11 @@ public class TableContextUtil {
     }
 
     //Initial offset should exist for all partition columns or none at all.
-    if (!tableConfigBean.offsetColumnToInitialOffsetValue.isEmpty()) {
+    if (!tableConfigBean.getOffsetColumnToInitialOffsetValue().isEmpty()) {
       Set<String> missingColumns =
-          Sets.difference(offsetColumnToType.keySet(), tableConfigBean.offsetColumnToInitialOffsetValue.keySet());
+          Sets.difference(offsetColumnToType.keySet(), tableConfigBean.getOffsetColumnToInitialOffsetValue().keySet());
       Set<String> extraColumns =
-          Sets.difference(tableConfigBean.offsetColumnToInitialOffsetValue.keySet(), offsetColumnToType.keySet());
+          Sets.difference(tableConfigBean.getOffsetColumnToInitialOffsetValue().keySet(), offsetColumnToType.keySet());
 
       if (!missingColumns.isEmpty() || !extraColumns.isEmpty()) {
         issues.add(context.createConfigIssue(
@@ -284,10 +303,10 @@ public class TableContextUtil {
         return null;
       }
 
-      populateInitialOffset(
+      // Read configured Initial Offset values from config and populate TableContext.offsetColumnToStartOffset
+      populateInitialOffsetfromConfig(
           context,
-          issues,
-          tableConfigBean.offsetColumnToInitialOffsetValue,
+          issues, tableConfigBean.getOffsetColumnToInitialOffsetValue(),
           tableJdbcELEvalContext,
           offsetColumnToStartOffset
       );
@@ -301,7 +320,7 @@ public class TableContextUtil {
     }
 
     final Map<String, String> offsetAdjustments = new HashMap<>();
-    offsetColumnToType.keySet().forEach(c -> offsetAdjustments.put(c, tableConfigBean.partitionSize));
+    offsetColumnToType.keySet().forEach(c -> offsetAdjustments.put(c, tableConfigBean.getPartitionSize()));
 
     return new TableContext(
         vendor,
@@ -313,10 +332,10 @@ public class TableContextUtil {
         offsetAdjustments,
         offsetColumnMinValues,
         offsetColumnMaxValues,
-        tableConfigBean.enableNonIncremental,
-        tableConfigBean.partitioningMode,
-        tableConfigBean.maxNumActivePartitions,
-        tableConfigBean.extraOffsetColumnConditions
+        tableConfigBean.isEnableNonIncremental(),
+        tableConfigBean.getPartitioningMode(),
+        tableConfigBean.getMaxNumActivePartitions(),
+        tableConfigBean.getExtraOffsetColumnConditions()
     );
   }
 
@@ -324,7 +343,7 @@ public class TableContextUtil {
    * Evaluate ELs in Initial offsets as needed and populate the final String representation of initial offsets
    * in {@param offsetColumnToStartOffset}
    */
-  private void populateInitialOffset(
+  private void populateInitialOffsetfromConfig(
       PushSource.Context context,
       List<Stage.ConfigIssue> issues,
       Map<String, String> configuredColumnToInitialOffset,
@@ -417,9 +436,9 @@ public class TableContextUtil {
   }
 
   /**
-   * Lists all tables matching the {@link TableConfigBean} and creates a table context for each table.
+   * Lists all tables matching the {@link TableConfigBeanImpl} and creates a table context for each table.
    * @param connection JDBC connection
-   * @param tableConfigBean {@link TableConfigBean}
+   * @param tableConfigBean {@link TableConfigBeanImpl}
    * @return Map of qualified table name to Table Context
    * @throws SQLException If list tables call fails
    * @throws StageException if partition configuration is not correct.
@@ -435,35 +454,45 @@ public class TableContextUtil {
   ) throws SQLException, StageException {
     Map<String, TableContext> tableContextMap = new LinkedHashMap<>();
     Pattern tableExclusion =
-        StringUtils.isEmpty(tableConfigBean.tableExclusionPattern)?
-            null : Pattern.compile(tableConfigBean.tableExclusionPattern);
+        StringUtils.isEmpty(tableConfigBean.getTableExclusionPattern()) ?
+            null : Pattern.compile(tableConfigBean.getTableExclusionPattern());
     Pattern schemaExclusion =
-        StringUtils.isEmpty(tableConfigBean.schemaExclusionPattern)?
-            null : Pattern.compile(tableConfigBean.schemaExclusionPattern);
-    try (ResultSet rs = jdbcUtil.getTableAndViewMetadata(connection, tableConfigBean.schema, tableConfigBean.tablePattern)) {
-      while (rs.next()) {
-        String schemaName = rs.getString(TABLE_METADATA_TABLE_SCHEMA_CONSTANT);
-        String tableName = rs.getString(TABLE_METADATA_TABLE_NAME_CONSTANT);
-        if (
-            (tableExclusion == null || !tableExclusion.matcher(tableName).matches()) &&
-            (schemaExclusion == null || !schemaExclusion.matcher(schemaName).matches())
-        ) {
-          TableContext tableContext = createTableContext(
-              vendor,
-              context,
-              issues,
-              connection,
-              schemaName,
-              tableName,
-              tableConfigBean,
-              tableJdbcELEvalContext,
-              quoteChar
-          );
-          if (tableContext != null) {
-            tableContextMap.put(
-                getQualifiedTableName(schemaName, tableName),
-                tableContext
+        StringUtils.isEmpty(tableConfigBean.getSchemaExclusionPattern()) ?
+            null : Pattern.compile(tableConfigBean.getSchemaExclusionPattern());
+    List<String> tablePatternList =
+        tableConfigBean.isTablePatternListProvided() ?
+            tableConfigBean.getTablePatternList() : Collections.singletonList(tableConfigBean.getTablePattern());
+
+    // Iterate over all the table Patterns provided and create a LinkedHashMap of type <tableName, TableContext>
+    for (String tablePattern : tablePatternList) {
+      try (ResultSet rs = jdbcUtil.getTableAndViewMetadata(connection,
+          tableConfigBean.getSchema(),
+          tablePattern
+      )) {
+        while (rs.next()) {
+          String schemaName = rs.getString(TABLE_METADATA_TABLE_SCHEMA_CONSTANT);
+          String tableName = rs.getString(TABLE_METADATA_TABLE_NAME_CONSTANT);
+          if (
+              (tableExclusion == null || !tableExclusion.matcher(tableName).matches()) &&
+                  (schemaExclusion == null || !schemaExclusion.matcher(schemaName).matches())
+          ) {
+            TableContext tableContext = createTableContext(
+                vendor,
+                context,
+                issues,
+                connection,
+                schemaName,
+                tableName,
+                tableConfigBean,
+                tableJdbcELEvalContext,
+                quoteChar
             );
+            if (tableContext != null) {
+              tableContextMap.put(
+                  getQualifiedTableName(schemaName, tableName),
+                  tableContext
+              );
+            }
           }
         }
       }
@@ -708,6 +737,16 @@ public class TableContextUtil {
                 ));
             }
           }
+          break;
+        case SQL_SERVER:
+          if (TableContextUtil.VENDOR_PARTITIONABLE_TYPES.get(DatabaseVendor.SQL_SERVER).contains(offsetJdbcType)) {
+            if (offsetJdbcType == TableContextUtil.TYPE_SQL_SERVER_DATETIMEOFFSET) {
+              final ZonedDateTime left = ZonedDateTime.parse(leftOffset, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+              final ZonedDateTime right = ZonedDateTime.parse(rightOffset, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+              return left.compareTo(right);
+            }
+          }
+          break;
       }
     }
 
@@ -748,6 +787,39 @@ public class TableContextUtil {
     throw new IllegalStateException(Utils.format("Unsupported type: {}", offsetJdbcType));
   }
 
+
+  /**
+   * Given 2 maps of type <columnName, offsetValue> - one for input and one to compare input with,
+   * Compare and update the inputMap with either the minimum or maximum value for each columnType,
+   * based on comparisonType
+   *
+   * @param tableContext the {@link TableContext} instance to look up offset column data from
+   * @param inputMap input Offset Map to compare and modify
+   * @param compareMap map to compare with
+   * @param comparisonType Whether to update input Map with min or max of values between input Map and compared Map
+   * @return modified Input Offset Map
+   */
+  public static void updateOffsetMapwithMinMax(
+      TableContext tableContext,
+      Map<String, String> inputMap,
+      Map<String,String> compareMap,
+      OffsetComparisonType comparisonType
+  ) {
+    inputMap.replaceAll(
+      (columnName, inputValue) -> {
+        String comparedValue = compareMap.get(columnName);
+        int greaterOrNot = TableContextUtil.compareOffsetValues(tableContext,
+            columnName,
+            inputValue,
+            comparedValue);
+
+        if (comparisonType == OffsetComparisonType.MAXIMUM)
+          return (greaterOrNot <= 0) ? comparedValue : inputValue;
+
+        return (greaterOrNot <= 0) ? inputValue : comparedValue;
+      });
+  }
+
   public static String generateNextPartitionOffset(
       TableContext tableContext,
       String column,
@@ -769,6 +841,16 @@ public class TableContextUtil {
               throw new IllegalStateException(Utils.format("Unsupported type: {}", offsetColumnType));
           }
         }
+        break;
+      case SQL_SERVER:
+        if(TableContextUtil.VENDOR_PARTITIONABLE_TYPES.get(DatabaseVendor.SQL_SERVER).contains(offsetColumnType)) {
+          if (offsetColumnType == TableContextUtil.TYPE_SQL_SERVER_DATETIMEOFFSET) {
+            return ZonedDateTime.parse(offset, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                .plusSeconds(Integer.parseInt(partitionSize))
+                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+          }
+        }
+        break;
     }
 
     switch (offsetColumnType) {

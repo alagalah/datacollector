@@ -24,13 +24,14 @@ import com.streamsets.pipeline.api.Target;
 import com.streamsets.pipeline.api.base.configurablestage.DTarget;
 
 @StageDef(
-    version = 2,
+    version = 3,
     label = "Couchbase",
     description = "Writes data to Couchbase",
     icon = "couchbase.png",
     recordsByRef = true,
     onlineHelpRefUrl = "index.html?contextID=task_cnl_dwq_h2b",
-    upgrader = CouchbaseTargetUpgrader.class
+    upgrader = CouchbaseTargetUpgrader.class,
+    upgraderDef = "upgrader/CouchbaseDTarget.yaml"
 )
 @HideConfigs({
     "config.dataFormatConfig.jsonMode",

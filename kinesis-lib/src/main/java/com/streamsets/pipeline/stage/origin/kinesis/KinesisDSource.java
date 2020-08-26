@@ -24,7 +24,7 @@ import com.streamsets.pipeline.api.StageDef;
 import com.streamsets.pipeline.api.base.configurablestage.DPushSource;
 
 @StageDef(
-    version = 6,
+    version = 8,
     label = "Kinesis Consumer",
     description = "Reads data from Kinesis",
     icon = "kinesis_multithreaded.png",
@@ -32,6 +32,7 @@ import com.streamsets.pipeline.api.base.configurablestage.DPushSource;
     recordsByRef = true,
     resetOffset = true,
     upgrader = KinesisSourceUpgrader.class,
+    upgraderDef = "upgrader/KinesisDSource.yaml",
     onlineHelpRefUrl ="index.html?contextID=task_p4b_vv4_yr"
 )
 @ConfigGroups(value = Groups.class)

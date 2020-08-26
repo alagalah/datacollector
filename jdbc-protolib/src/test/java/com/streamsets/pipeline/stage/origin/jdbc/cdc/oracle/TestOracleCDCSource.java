@@ -15,51 +15,24 @@
  */
 package com.streamsets.pipeline.stage.origin.jdbc.cdc.oracle;
 
-import com.google.common.collect.ImmutableList;
-import com.streamsets.pipeline.stage.origin.jdbc.cdc.SchemaAndTable;
-import com.streamsets.pipeline.api.impl.Utils;
-import org.apache.commons.lang3.RandomStringUtils;
-import org.junit.Test;
 import org.junit.Assert;
+import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.regex.Pattern;
 
 public class TestOracleCDCSource {
 
   @Test
-  public void testGetListOfSchemasAndTables(){
-    List<SchemaAndTable> tables = ImmutableList.of(
-        new SchemaAndTable("SYS", "TEST1"),
-        new SchemaAndTable("SYS", "TEST2")
-    );
+  public void testExclusionPattern() {
     OracleCDCConfigBean configBean = new OracleCDCConfigBean();
-    configBean.dictionary = DictionaryValues.DICT_FROM_ONLINE_CATALOG;
-    OracleCDCSource source = new OracleCDCSource(null, configBean);
-    String actual = source.getListOfSchemasAndTables(tables);
-    Assert.assertEquals("( (SEG_OWNER='SYS' AND (TABLE_NAME IN ('TEST1','TEST2'))) )", actual);
-  }
+    OracleCDCSource stage = new OracleCDCSource(null, configBean);
 
-  @Test
-  public void testGetListOfSchemasAndTablesBig(){
-    List<String> listOfTables = new ArrayList<>(1010);
-    List<SchemaAndTable> schemaAndTables = new ArrayList<>(1010);
-    for (int i = 0; i < 1010; i++) {
-      String tableName = RandomStringUtils.randomAlphanumeric(5);
-      listOfTables.add(Utils.format("'{}'",tableName));
-      schemaAndTables.add(new SchemaAndTable("SYS", tableName));
-    }
+    Pattern pattern1 = stage.createRegexFromSqlLikePattern("%PATT.ERN%");
+    Assert.assertFalse(pattern1.matcher("PATTERN1").matches());
+    Assert.assertTrue(pattern1.matcher("MY_PATT.ERN_23").matches());
 
-    OracleCDCConfigBean configBean = new OracleCDCConfigBean();
-    configBean.dictionary = DictionaryValues.DICT_FROM_ONLINE_CATALOG;
-    OracleCDCSource source = new OracleCDCSource(null, configBean);
-
-    String actual = source.getListOfSchemasAndTables(schemaAndTables);
-    String expected = Utils.format(
-        "( (SEG_OWNER='SYS' AND (TABLE_NAME IN ({}) OR TABLE_NAME IN ({}))) )",
-        String.join(",", listOfTables.subList(0,1000)),
-        String.join(",", listOfTables.subList(1000,1010))
-    );
-    Assert.assertEquals(expected, actual);
+    Pattern pattern2 = stage.createRegexFromSqlLikePattern("PATT!!._ERN%");
+    Assert.assertFalse(pattern2.matcher("PATT!!.ERN").matches());
+    Assert.assertTrue(pattern2.matcher("PATT!!.?ERN_ACCEPTED").matches());
   }
 }

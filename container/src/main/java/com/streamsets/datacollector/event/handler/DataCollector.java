@@ -19,10 +19,13 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.function.Function;
 
+import com.streamsets.datacollector.config.ConnectionConfiguration;
 import com.streamsets.datacollector.config.PipelineConfiguration;
+import com.streamsets.datacollector.execution.PipelineState;
 import com.streamsets.datacollector.config.RuleDefinitions;
 import com.streamsets.datacollector.event.dto.AckEvent;
 import com.streamsets.datacollector.event.dto.PipelineStartEvent;
@@ -41,7 +44,7 @@ public interface DataCollector {
    */
   void init();
 
-  void start(Runner.StartPipelineContext context, String name, String rev) throws PipelineException, StageException;
+  void start(Runner.StartPipelineContext context, String name, String rev, Set<String> groups) throws PipelineException, StageException;
 
   void stop(String user, String name, String rev) throws PipelineException;
 
@@ -58,7 +61,8 @@ public interface DataCollector {
       PipelineConfiguration pipelineConfiguration,
       RuleDefinitions ruleDefinitions,
       Acl acl,
-      Map<String, Object> metadata
+      Map<String, Object> metadata,
+      Map<String, ConnectionConfiguration> connections
   ) throws PipelineException;
 
   void savePipelineRules(String name, String rev, RuleDefinitions ruleDefinitions) throws PipelineException;
@@ -103,7 +107,8 @@ public interface DataCollector {
       long timeoutMillis,
       boolean testOrigin,
       List<PipelineStartEvent.InterceptorConfiguration> interceptorConfs,
-      Function<Object, Void> afterActionsFunction
+      Function<Object, Void> afterActionsFunction,
+      Map<String, ConnectionConfiguration> connections
   ) throws PipelineException;
 
   Future<AckEvent> stopAndDelete(String user, String name, String rev,
@@ -134,4 +139,11 @@ public interface DataCollector {
    * Store new configuration from control hub inside this data collector in a persistent manner.
    */
   void storeConfiguration(Map<String, String> newConfiguration) throws IOException;
+
+  /**
+   * Get runner for a pipeline
+   */
+  Runner getRunner(String runner, String rev) throws PipelineException;
+
+  List<PipelineState> getRemotePipelines() throws PipelineException;
 }

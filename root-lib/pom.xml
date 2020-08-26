@@ -23,19 +23,19 @@
   <parent>
     <groupId>com.streamsets</groupId>
     <artifactId>streamsets-datacollector-root-proto</artifactId>
-    <version>3.10.0-SNAPSHOT</version>
+    <version>3.19.0-SNAPSHOT</version>
     <relativePath>../root-proto</relativePath>
   </parent>
   <groupId>com.streamsets</groupId>
   <artifactId>streamsets-datacollector-root-lib</artifactId>
-  <version>3.10.0-SNAPSHOT</version>
+  <version>3.19.0-SNAPSHOT</version>
   <description>StreamSets Data Collector Root Libraries POM</description>
   <name>StreamSets Data Collector Root Libraries POM</name>
   <packaging>pom</packaging>
 
   <properties>
-    <commons-compress.version>1.18</commons-compress.version>
-    <confluent.version>3.0.1</confluent.version>
+    <commons-compress.version>1.19</commons-compress.version>
+    <confluent.version>5.3.1</confluent.version>
     <mockserver.version>3.10.8</mockserver.version>
   </properties>
 
@@ -54,6 +54,16 @@
       </dependency>
       <dependency>
         <groupId>com.streamsets</groupId>
+        <artifactId>streamsets-utils</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.streamsets</groupId>
+        <artifactId>streamsets-datacollector-upgrader</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.streamsets</groupId>
         <artifactId>streamsets-datacollector-stagesupport</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -84,6 +94,16 @@
         <artifactId>streamsets-datacollector-guavasupport</artifactId>
         <version>${project.version}</version>
         <type>test-jar</type>
+      </dependency>
+      <dependency>
+        <groupId>com.streamsets</groupId>
+        <artifactId>streamsets-datacollector-aws-s3-connection</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.streamsets</groupId>
+        <artifactId>streamsets-datacollector-jdbc-connection</artifactId>
+        <version>${project.version}</version>
       </dependency>
       <dependency>
         <groupId>com.streamsets</groupId>
@@ -190,12 +210,6 @@
       <dependency>
         <groupId>com.streamsets</groupId>
         <artifactId>streamsets-datacollector-kafka_multisource-0_9-protolib</artifactId>
-        <type>test-jar</type>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.streamsets</groupId>
-        <artifactId>streamsets-datacollector-kafka_multisource-protolib</artifactId>
         <type>test-jar</type>
         <version>${project.version}</version>
       </dependency>

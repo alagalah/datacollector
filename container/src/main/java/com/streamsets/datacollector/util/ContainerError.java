@@ -99,6 +99,10 @@ public enum ContainerError implements ErrorCode {
   CONTAINER_0213("Could not retrieve pipelines from Pipeline Store. See stacktrace for additional details: '{}'"),
   CONTAINER_0214("Can't store new pipeline state: {}"),
 
+
+  CONTAINER_0215("Sample pipeline '{}' does not exist"),
+  CONTAINER_0216("Cannot load details for sample pipeline '{}': {}"),
+
   //Previewr
   CONTAINER_0250("Cannot create previewer: '{}'"),
 
@@ -138,7 +142,7 @@ public enum ContainerError implements ErrorCode {
   CONTAINER_0792("Pipeline lifecycle event stage generated error record: {}"),
 
   //Runner
-  CONTAINER_0800("Pipeline '{}' validation error : {}"),
+  CONTAINER_0800("Can't start pipeline due {} validation error(s). First one: {}"),
   CONTAINER_0801("Thread unexpectedly interrupted"),
   CONTAINER_0802("Detected run away pipeline runners (only {} out of {} runners have finished)"),
   CONTAINER_0803("Trying to acquire pipeline runner after the pool was destroyed."),
@@ -149,6 +153,7 @@ public enum ContainerError implements ErrorCode {
   CONTAINER_0902("Definition requires at least version {} which is higher then available library supports ({})"),
   CONTAINER_0903("Could not find service definition for '{}'"),
   CONTAINER_0904("Service Upgrader can't register another service."),
+  CONTAINER_0905("Stage library {} is a legacy library and must be installed separately"),
 
   //Email Notifier
   CONTAINER_01000("Error loading email template, reason : {}"),
@@ -179,6 +184,9 @@ public enum ContainerError implements ErrorCode {
   CONTAINER_01603("Starting Edge pipeline failed, status code '{}': {}"),
   CONTAINER_01604("Reset Offset for Edge pipeline failed, status code '{}': {}"),
   CONTAINER_01605("Publishing Edge pipeline failed, status code '{}': {}"),
+
+
+  CONTAINER_01700("Publishing pipeline to Control Hub failed, status code '{}': {}"),
   ;
 
   private final String msg;

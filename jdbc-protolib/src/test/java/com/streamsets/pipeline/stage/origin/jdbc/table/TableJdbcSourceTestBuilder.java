@@ -16,7 +16,8 @@
 package com.streamsets.pipeline.stage.origin.jdbc.table;
 
 import com.streamsets.pipeline.lib.jdbc.ConnectionPropertyBean;
-import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
+import com.streamsets.pipeline.lib.jdbc.JdbcHikariPoolConfigBean;
+import com.streamsets.pipeline.lib.jdbc.connection.JdbcConnection;
 import com.streamsets.pipeline.lib.jdbc.multithread.BatchTableStrategy;
 import com.streamsets.pipeline.lib.jdbc.multithread.TableOrderStrategy;
 import com.streamsets.pipeline.stage.origin.jdbc.CommonSourceConfigBean;
@@ -38,7 +39,7 @@ public class TableJdbcSourceTestBuilder {
   private int maxBatchSize;
   private int maxClobSize;
   private int maxBlobSize;
-  private List<TableConfigBean> tableConfigBeanList;
+  private List<TableConfigBeanImpl> tableConfigBeanList;
   private String timeZoneID;
   private int fetchSize;
   private BatchTableStrategy batchTableStrategy;
@@ -140,12 +141,12 @@ public class TableJdbcSourceTestBuilder {
     return this;
   }
 
-  public TableJdbcSourceTestBuilder tableConfigBeans(List<TableConfigBean> tableConfigBeans) {
+  public TableJdbcSourceTestBuilder tableConfigBeans(List<TableConfigBeanImpl> tableConfigBeans) {
     this.tableConfigBeanList.addAll(tableConfigBeans);
     return this;
   }
 
-  public TableJdbcSourceTestBuilder tableConfigBean(TableConfigBean tableConfigBean) {
+  public TableJdbcSourceTestBuilder tableConfigBean(TableConfigBeanImpl tableConfigBean) {
     this.tableConfigBeanList.add(tableConfigBean);
     return this;
   }
@@ -196,11 +197,12 @@ public class TableJdbcSourceTestBuilder {
   }
 
   public TableJdbcSource build() {
-    HikariPoolConfigBean hikariPoolConfigBean = new HikariPoolConfigBean();
-    hikariPoolConfigBean.useCredentials = useCredentials;
-    hikariPoolConfigBean.connectionString = connectionString;
-    hikariPoolConfigBean.username = () -> username;
-    hikariPoolConfigBean.password = () -> password;
+    JdbcHikariPoolConfigBean hikariPoolConfigBean = new JdbcHikariPoolConfigBean();
+    hikariPoolConfigBean.connection = new JdbcConnection();
+    hikariPoolConfigBean.connection.useCredentials = useCredentials;
+    hikariPoolConfigBean.connection.connectionString = connectionString;
+    hikariPoolConfigBean.connection.username = () -> username;
+    hikariPoolConfigBean.connection.password = () -> password;
     hikariPoolConfigBean.driverClassName = driverClassName;
     hikariPoolConfigBean.driverProperties = driverProperties;
     hikariPoolConfigBean.connectionTestQuery = connectionTestQuery;
@@ -327,8 +329,8 @@ public class TableJdbcSourceTestBuilder {
       return this;
     }
 
-    public TableConfigBean build() {
-      TableConfigBean tableConfigBean = new TableConfigBean();
+    public TableConfigBeanImpl build() {
+      TableConfigBeanImpl tableConfigBean = new TableConfigBeanImpl();
       tableConfigBean.schema = schema;
       tableConfigBean.tablePattern = tablePattern;
       tableConfigBean.tableExclusionPattern = tableExclusionPattern;

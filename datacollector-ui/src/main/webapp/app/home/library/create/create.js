@@ -19,7 +19,9 @@
 
 angular
   .module('dataCollectorApp.home')
-  .controller('CreateModalInstanceController', function ($scope, $modalInstance, $translate, api, pipelineType) {
+  .controller('CreateModalInstanceController', function (
+    $scope, $modalInstance, $translate, api, pipelineType, tracking, trackingEvent
+  ) {
     api.pipelineAgent.getPipelineLabels().then(function(res) {$scope.pipelineLabels = res.data;});
     angular.extend($scope, {
       common: {
@@ -46,6 +48,9 @@ angular
           ).then(
             function(res) {
               $modalInstance.close(res.data);
+              tracking.mixpanel.people.set({'Core Journey Stage - Pipeline Created': true});
+              tracking.mixpanel.track(trackingEvent.PIPELINE_CREATED, {'Pipeline ID': res.data.pipelineId});
+              tracking.FS.event(trackingEvent.PIPELINE_CREATED, {'Pipeline ID': res.data.pipelineId});
             },
             function(res) {
               $scope.common.errors = [res.data];
@@ -62,7 +67,7 @@ angular
       },
 
       refreshResults : function ($select){
-        let search = $select.search,
+        var search = $select.search,
           list = angular.copy($scope.pipelineLabels);
         //remove last user input
         list = list.filter(function(item) {

@@ -30,7 +30,19 @@ public class JdbcQueryExecutorUpgrader extends JdbcBaseUpgrader{
     switch(fromVersion) {
       case 1:
         upgradeV1toV2(configs);
+        if (toVersion == 2) {
+          break;
+        }
+        // fall through
+      case 2:
+        upgradeV2toV3(configs);
         break;
+        // fall through
+
+// ALEX
+
+        //TODO when we use this class call JdbcBaseUpgrader.removeDriverClassNameAndTestQuery();
+
       default:
         throw new IllegalStateException(Utils.format("Unexpected fromVersion {}", fromVersion));
     }
@@ -39,5 +51,9 @@ public class JdbcQueryExecutorUpgrader extends JdbcBaseUpgrader{
 
   private void upgradeV1toV2(List<Config> configs) {
     configs.add(new Config("config.batchCommit", false));
+  }
+
+  private void upgradeV2toV3(List<Config> configs) {
+    configs.add(new Config("config.parallel", false));
   }
 }

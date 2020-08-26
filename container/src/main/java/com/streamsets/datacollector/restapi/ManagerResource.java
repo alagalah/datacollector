@@ -29,7 +29,7 @@ import com.streamsets.datacollector.main.UserGroupManager;
 import com.streamsets.datacollector.restapi.bean.AlertInfoJson;
 import com.streamsets.datacollector.restapi.bean.BeanHelper;
 import com.streamsets.datacollector.restapi.bean.ErrorMessageJson;
-import com.streamsets.datacollector.restapi.bean.MetricRegistryJson;
+import com.streamsets.datacollector.event.json.MetricRegistryJson;
 import com.streamsets.datacollector.restapi.bean.MultiStatusResponseJson;
 import com.streamsets.datacollector.restapi.bean.PipelineStateJson;
 import com.streamsets.datacollector.restapi.bean.RecordJson;
@@ -42,6 +42,7 @@ import com.streamsets.datacollector.runner.PipelineRuntimeException;
 import com.streamsets.datacollector.store.AclStoreTask;
 import com.streamsets.datacollector.store.PipelineInfo;
 import com.streamsets.datacollector.store.PipelineStoreTask;
+import com.streamsets.datacollector.store.impl.AclPipelineStoreTask;
 import com.streamsets.datacollector.util.AuthzRole;
 import com.streamsets.datacollector.util.ContainerError;
 import com.streamsets.datacollector.util.EdgeUtil;
@@ -101,7 +102,6 @@ public class ManagerResource {
       UserGroupManager userGroupManager
   ) {
     this.user = principal.getName();
-    this.store = store;
 
     UserJson currentUser;
     if (runtimeInfo.isDPMEnabled() && !runtimeInfo.isRemoteSsoDisabled()) {
@@ -112,8 +112,10 @@ public class ManagerResource {
 
     if (runtimeInfo.isAclEnabled()) {
       this.manager = new AclManager(manager, aclStore, currentUser);
+      this.store = new AclPipelineStoreTask(store, aclStore, currentUser);
     } else {
       this.manager = manager;
+      this.store = store;
     }
   }
 
@@ -141,14 +143,24 @@ public class ManagerResource {
   @PermitAll
   public Response getPipelineStatus(
     @PathParam("pipelineId") String pipelineId,
-    @QueryParam("rev") @DefaultValue("0") String rev
+    @QueryParam("rev") @DefaultValue("0") String rev,
+    @QueryParam("onlyIfExists") boolean onlyIfExists
   ) throws PipelineException {
-    PipelineInfo pipelineInfo = store.getInfo(pipelineId);
-    RestAPIUtils.injectPipelineInMDC(pipelineInfo.getTitle(), pipelineInfo.getPipelineId());
-    if(pipelineId != null) {
-      return Response.ok()
-          .type(MediaType.APPLICATION_JSON)
-          .entity(BeanHelper.wrapPipelineState(manager.getPipelineState(pipelineId, rev))).build();
+    try {
+      PipelineInfo pipelineInfo = store.getInfo(pipelineId);
+      RestAPIUtils.injectPipelineInMDC(pipelineInfo.getTitle(), pipelineInfo.getPipelineId());
+      if(pipelineId != null) {
+        return Response.ok()
+            .type(MediaType.APPLICATION_JSON)
+            .entity(BeanHelper.wrapPipelineState(manager.getPipelineState(pipelineId, rev))).build();
+      }
+    } catch (PipelineException ex) {
+      if (onlyIfExists && ContainerError.CONTAINER_0200.equals(ex.getErrorCode())) {
+        // If new query param onlyIfExists passed, return pipeline metrics only pipelineId exists otherwise return
+        // null instead of throwing pipeline not found exception
+        return Response.ok(null).build();
+      }
+      throw ex;
     }
     return Response.noContent().build();
   }
@@ -523,21 +535,30 @@ public class ManagerResource {
   @PermitAll
   public Response getMetrics(
       @PathParam("pipelineId") String pipelineId,
-      @QueryParam("rev") @DefaultValue("0") String rev
+      @QueryParam("rev") @DefaultValue("0") String rev,
+      @QueryParam("onlyIfExists") boolean onlyIfExists
   ) throws PipelineException {
-    PipelineInfo pipelineInfo = store.getInfo(pipelineId);
-    RestAPIUtils.injectPipelineInMDC(pipelineInfo.getTitle(), pipelineInfo.getPipelineId());
-    if(pipelineId != null) {
-      PipelineState pipelineState = manager.getPipelineState(pipelineId, rev);
-      Runner runner = manager.getRunner(pipelineId, rev);
-      if (runner != null && runner.getState().getStatus().isActive()) {
-        return Response.ok().type(MediaType.APPLICATION_JSON).entity(runner.getMetrics()).build();
+    try {
+      PipelineInfo pipelineInfo = store.getInfo(pipelineId);
+      RestAPIUtils.injectPipelineInMDC(pipelineInfo.getTitle(), pipelineInfo.getPipelineId());
+      if (pipelineId != null) {
+        Runner runner = manager.getRunner(pipelineId, rev);
+        if (runner != null && runner.getState().getStatus().isActive()) {
+          return Response.ok().type(MediaType.APPLICATION_JSON).entity(runner.getMetrics()).build();
+        }
+        if (runner != null) {
+          LOG.debug("Status is " + runner.getState().getStatus());
+        } else {
+          LOG.debug("Runner is null");
+        }
       }
-      if (runner != null) {
-        LOG.debug("Status is " + runner.getState().getStatus());
-      } else {
-        LOG.debug("Runner is null");
+    } catch (PipelineException ex) {
+      if (onlyIfExists && ContainerError.CONTAINER_0200.equals(ex.getErrorCode())) {
+        // If new query param onlyIfExists passed, return pipeline metrics only pipelineId exists otherwise return
+        // null instead of throwing pipeline not found exception
+        return Response.ok(null).build();
       }
+      throw ex;
     }
     return Response.noContent().build();
   }

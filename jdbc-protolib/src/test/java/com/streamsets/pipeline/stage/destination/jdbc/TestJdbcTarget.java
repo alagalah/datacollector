@@ -25,6 +25,7 @@ import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.Target;
 import com.streamsets.pipeline.api.base.OnRecordErrorException;
 import com.streamsets.pipeline.lib.jdbc.*;
+import com.streamsets.pipeline.lib.jdbc.connection.JdbcConnection;
 import com.streamsets.pipeline.lib.operation.ChangeLogFormat;
 import com.streamsets.pipeline.lib.operation.UnsupportedOperationAction;
 import com.streamsets.pipeline.sdk.RecordCreator;
@@ -33,6 +34,7 @@ import junit.framework.Assert;
 import org.joda.time.Instant;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -57,6 +59,7 @@ import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 @SuppressWarnings("Duplicates")
+@Ignore //SCJDBC-132. Migrate this class to STF
 public class TestJdbcTarget {
 
   private final String username = "sa";
@@ -160,12 +163,13 @@ public class TestJdbcTarget {
     }
   }
 
-  private HikariPoolConfigBean createConfigBean(String connectionString, String username, String password) {
-    HikariPoolConfigBean bean = new HikariPoolConfigBean();
-    bean.connectionString = connectionString;
-    bean.useCredentials = true;
-    bean.username = () -> username;
-    bean.password = () -> password;
+  private JdbcHikariPoolConfigBean createConfigBean(String connectionString, String username, String password) {
+    JdbcHikariPoolConfigBean bean = new JdbcHikariPoolConfigBean();
+    bean.connection = new JdbcConnection();
+    bean.connection.connectionString = connectionString;
+    bean.connection.useCredentials = true;
+    bean.connection.username = () -> username;
+    bean.connection.password = () -> password;
 
     return bean;
   }

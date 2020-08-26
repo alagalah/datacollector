@@ -15,7 +15,9 @@
  */
 package com.streamsets.pipeline.lib.jdbc;
 
+import com.google.common.collect.ImmutableSet;
 import com.streamsets.pipeline.api.ConfigDef;
+import com.streamsets.pipeline.api.ErrorCode;
 import com.streamsets.pipeline.api.ListBeanModel;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
@@ -24,12 +26,28 @@ import com.streamsets.pipeline.api.credential.CredentialValue;
 import com.streamsets.pipeline.lib.el.TimeEL;
 import com.streamsets.pipeline.lib.jdbc.multithread.DatabaseVendor;
 import com.streamsets.pipeline.stage.destination.jdbc.Groups;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.sql.Driver;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.ServiceLoader;
+import java.util.Set;
 
-public class HikariPoolConfigBean {
+public abstract class HikariPoolConfigBean {
+  private static final Logger LOG = LoggerFactory.getLogger(HikariPoolConfigBean.class);
+
+  private static final String GENERIC_CONNECTION_STRING_TEMPLATE = "://%s:%d%s";
+
+  private static final String CONF_DRIVERS_LOAD = "com.streamsets.pipeline.stage.jdbc.drivers.load";
+
   private static final int TEN_MINUTES = 600;
   private static final int THIRTY_MINUTES = 1800;
   private static final int THIRTY_SECONDS = 30;
@@ -60,49 +78,10 @@ public class HikariPoolConfigBean {
   public static final String MAX_LIFETIME_NAME = "maxLifetime";
   public static final String READ_ONLY_NAME = "readOnly";
 
+  private Properties additionalProperties = new Properties();
 
   @ConfigDef(
-      required = true,
-      type = ConfigDef.Type.STRING,
-      label = "JDBC Connection String",
-      displayPosition = 10,
-      group = "JDBC"
-  )
-  public String connectionString = "";
-
-  @ConfigDef(
-      required = true,
-      type = ConfigDef.Type.BOOLEAN,
-      defaultValue = "true",
-      label = "Use Credentials",
-      displayPosition = 15,
-      group = "JDBC"
-  )
-  public boolean useCredentials;
-
-  @ConfigDef(
-      required = true,
-      type = ConfigDef.Type.CREDENTIAL,
-      dependsOn = "useCredentials",
-      triggeredByValue = "true",
-      label = "Username",
-      displayPosition = 110,
-      group = "CREDENTIALS"
-  )
-  public CredentialValue username;
-
-  @ConfigDef(
-      required = true,
-      type = ConfigDef.Type.CREDENTIAL,
-      dependsOn = "useCredentials",
-      triggeredByValue = "true",
-      label = "Password",
-      displayPosition = 120,
-      group = "CREDENTIALS"
-  )
-  public CredentialValue password;
-
-  @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.MODEL,
       defaultValue = "[]",
@@ -115,6 +94,7 @@ public class HikariPoolConfigBean {
   public List<ConnectionPropertyBean> driverProperties = new ArrayList<>();
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.STRING,
       label = "JDBC Driver Class Name",
@@ -125,6 +105,7 @@ public class HikariPoolConfigBean {
   public String driverClassName = "";
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.TEXT,
       mode = ConfigDef.Mode.SQL,
@@ -136,6 +117,7 @@ public class HikariPoolConfigBean {
   public String connectionTestQuery = "";
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Maximum Pool Size",
@@ -148,6 +130,7 @@ public class HikariPoolConfigBean {
   public int maximumPoolSize = DEFAULT_MAX_POOL_SIZE;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Minimum Idle Connections",
@@ -161,6 +144,7 @@ public class HikariPoolConfigBean {
   public int minIdle = DEFAULT_MIN_IDLE;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Connection Timeout (Seconds)",
@@ -174,6 +158,7 @@ public class HikariPoolConfigBean {
   public int connectionTimeout = DEFAULT_CONNECTION_TIMEOUT;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Idle Timeout (Seconds)",
@@ -189,6 +174,7 @@ public class HikariPoolConfigBean {
   public int idleTimeout = DEFAULT_IDLE_TIMEOUT;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       label = "Max Connection Lifetime (Seconds)",
@@ -203,6 +189,7 @@ public class HikariPoolConfigBean {
   public int maxLifetime = DEFAULT_MAX_LIFETIME;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       label = "Auto Commit",
@@ -214,6 +201,7 @@ public class HikariPoolConfigBean {
   public boolean autoCommit = false;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       label = "Enforce Read-only Connection",
@@ -226,18 +214,20 @@ public class HikariPoolConfigBean {
   public boolean readOnly = true;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.TEXT,
       mode = ConfigDef.Mode.SQL,
       label = "Init Query",
       description = "SQL query that will be executed on all new connections when they are created, before they are" +
-        " added to connection pool.",
+          " added to the connection pool.",
       displayPosition = 80,
       group = "ADVANCED"
   )
   public String initialQuery = "";
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
       label = "Transaction Isolation",
@@ -249,12 +239,19 @@ public class HikariPoolConfigBean {
   @ValueChooserModel(TransactionIsolationLevelChooserValues.class)
   public TransactionIsolationLevel transactionIsolation = TransactionIsolationLevel.DEFAULT;
 
-
   private static final String HIKARI_CONFIG_PREFIX = "hikariConfigBean.";
   private static final String DRIVER_CLASSNAME = HIKARI_CONFIG_PREFIX + "driverClassName";
 
 
   public List<Stage.ConfigIssue> validateConfigs(Stage.Context context, List<Stage.ConfigIssue> issues) {
+    ensureJdbcDrivers(context);
+
+    // Finally we dump registered drivers to logs
+    LOG.info("Currently Registered JDBC drivers:");
+    Collections.list(DriverManager.getDrivers()).forEach(driver -> {
+      LOG.info("Driver class {} (version {}.{})", driver.getClass().getName(), driver.getMajorVersion(), driver.getMinorVersion());
+    });
+
     // Validation for NUMBER fields is currently disabled due to allowing ELs so we do our own here.
     if (maximumPoolSize < MAX_POOL_SIZE_MIN) {
       issues.add(
@@ -339,23 +336,122 @@ public class HikariPoolConfigBean {
     return issues;
   }
 
+  /**
+   * Java services facility that JDBC uses for auto-loading drivers doesn't entirely work properly with multiple
+   * class loaders. To ease on the user experience, we attempt to remediate the situation in various ways.
+   */
+  private void ensureJdbcDrivers(Stage.Context context) {
+    // Currently loaded drivers
+    Set<String> loadedDrivers = new HashSet<>();
+    Collections.list(DriverManager.getDrivers()).forEach(driver -> loadedDrivers.add(driver.getClass().getName()));
+
+    // 1) Attempt at improving the situation with Java not always working properly with JDBC drivers is that we
+    // go over all known JDBC 4 compatible drivers again (via the services concept) and make sure that they are all
+    // registered.
+    LOG.debug("Exploring Service Loader for available JDBC drivers");
+    for (Driver driver : ServiceLoader.load(Driver.class)) {
+      if(loadedDrivers.contains(driver.getClass().getName())) {
+        LOG.debug("Driver {} already loaded", driver.getClass().getName());
+      } else {
+        LOG.debug("Driver {} wasn't registered, registering now", driver.getClass().getName());
+        try {
+          DriverManager.registerDriver(driver);
+          loadedDrivers.add(driver.getClass().getName());
+        } catch (SQLException e) {
+          LOG.error("Explicit registration of {} have failed: {}", driver.getClass().getName(), e.getMessage(), e);
+        }
+      }
+    }
+
+    // 2) Explicitly attempting to load known drivers if the service loading fails again
+    loadVendorDriver(loadedDrivers);
+
+    // 3) User can explicitly configure to auto-load given drivers
+    LOG.debug("Loading explicitly configured drivers");
+    String explicitDrivers = context.getConfiguration().get(CONF_DRIVERS_LOAD, "");
+    for(String driver : explicitDrivers.split(",")) {
+      ensureJdbcDriverIfNeeded(loadedDrivers, driver);
+    }
+  }
+
+  protected void loadVendorDriver(Set<String> loadedDrivers) {
+    LOG.debug("Loading known JDBC drivers");
+    for(DatabaseVendor vendor: DatabaseVendor.values()) {
+      if(vendor.getDrivers() != null) {
+        for (String driver : vendor.getDrivers()) {
+          ensureJdbcDriverIfNeeded(loadedDrivers, driver);
+        }
+      }
+    }
+  }
+
+  protected void ensureJdbcDriverIfNeeded(Set<String> loadedDrivers, String driver) {
+    try {
+      Class klass = Class.forName(driver);
+
+      if (loadedDrivers.contains(klass.getName())) {
+        LOG.debug("Driver {} already known", driver);
+      } else {
+        DriverManager.registerDriver((Driver) klass.newInstance());
+        loadedDrivers.add(klass.getName());
+      }
+
+    } catch (Throwable e) {
+      LOG.debug("Can't pre-load {} ({})", driver, e.getClass().getSimpleName());
+    }
+  }
+
   public Properties getDriverProperties() throws StageException {
-    Properties properties = new Properties();
     for (ConnectionPropertyBean bean : driverProperties) {
-      properties.setProperty(bean.key, bean.value.get());
+      additionalProperties.setProperty(bean.key, bean.value.get());
     }
-    return properties;
+    return additionalProperties;
   }
 
-  public String getConnectionString() {
-    return connectionString;
+  public void addExtraDriverProperties(Map<String, String> keyValueProperties) {
+    for (Map.Entry<String, String> property : keyValueProperties.entrySet()) {
+      additionalProperties.setProperty(property.getKey(), property.getValue());
+    }
   }
 
-  public DatabaseVendor getVendor() {
-    if(connectionString.startsWith("jdbc:oracle:")) {
-      return DatabaseVendor.ORACLE;
-    }
+  public String getConnectionStringTemplate() {
+    return getConnectionString().split("://")[0].concat(GENERIC_CONNECTION_STRING_TEMPLATE);
+  }
 
-    return DatabaseVendor.UNKNOWN;
+  public Set<BasicConnectionString.Pattern> getPatterns() {
+    List<BasicConnectionString.Pattern> listOfPatterns = new ArrayList<>();
+
+    // As it is the generic JDBC we want to match any connection string
+
+    listOfPatterns.add(new BasicConnectionString.Pattern("((.)*)", 1, null, 0, 1, 0));
+
+    return ImmutableSet.copyOf(listOfPatterns);
+  }
+
+  public ErrorCode getNonBasicUrlErrorCode() {
+    return JdbcErrors.JDBC_500;
+  }
+
+  public void setAutoCommit(boolean autoCommit) {
+    this.autoCommit = autoCommit;
+  }
+
+  public boolean isAutoCommit() {
+    return autoCommit;
+  }
+
+  public abstract String getConnectionString();
+
+  public abstract DatabaseVendor getVendor();
+
+  public abstract CredentialValue getUsername();
+
+  public abstract CredentialValue getPassword();
+
+  public abstract boolean useCredentials();
+
+  public void setConnectionString(String connectionString) {
+    // Do nothing, in this case since we are using the generic JDBC we don't want to change the original connection
+    // string, be careful this method should not be used in test but must be used in any new change.
   }
 }

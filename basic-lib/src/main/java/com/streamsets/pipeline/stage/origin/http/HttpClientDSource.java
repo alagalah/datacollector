@@ -25,7 +25,7 @@ import com.streamsets.pipeline.api.StageDef;
 import com.streamsets.pipeline.api.base.configurablestage.DSource;
 
 @StageDef(
-    version = 14,
+    version = 18,
     label = "HTTP Client",
     description = "Uses an HTTP client to read records from an URL.",
     icon = "httpclient.png",
@@ -33,6 +33,7 @@ import com.streamsets.pipeline.api.base.configurablestage.DSource;
     resetOffset = true,
     recordsByRef = true,
     upgrader = HttpClientSourceUpgrader.class,
+    upgraderDef = "upgrader/HttpClientDSource.yaml",
     onlineHelpRefUrl ="index.html?contextID=task_akl_rkz_5r"
 )
 @HideConfigs(value = {

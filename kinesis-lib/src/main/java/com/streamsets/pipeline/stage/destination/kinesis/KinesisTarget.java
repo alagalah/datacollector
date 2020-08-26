@@ -31,7 +31,7 @@ import com.streamsets.pipeline.api.el.ELEval;
 import com.streamsets.pipeline.api.el.ELEvalException;
 import com.streamsets.pipeline.api.el.ELVars;
 import com.streamsets.pipeline.api.impl.Utils;
-import com.streamsets.pipeline.lib.aws.AwsRegion;
+import com.streamsets.pipeline.stage.lib.aws.AwsRegion;
 import com.streamsets.pipeline.lib.el.ELUtils;
 import com.streamsets.pipeline.lib.el.RecordEL;
 import com.streamsets.pipeline.lib.generator.DataGenerator;
@@ -60,6 +60,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.regex.Matcher;
 
 import static com.streamsets.pipeline.stage.lib.kinesis.KinesisUtil.KINESIS_CONFIG_BEAN;
 import static com.streamsets.pipeline.stage.lib.kinesis.KinesisUtil.ONE_MB;
@@ -137,7 +138,17 @@ public class KinesisTarget extends BaseTarget {
             .setCredentialsProvider(AWSUtil.getCredentialsProvider(conf.awsConfig));
 
         if (conf.region == AwsRegion.OTHER) {
-          producerConfig.setKinesisEndpoint(conf.endpoint);
+          Matcher matcher = KinesisUtil.REGION_PATTERN.matcher(conf.endpoint);
+          if (matcher.find()) {
+            producerConfig.setKinesisEndpoint(conf.endpoint.substring(matcher.start(), matcher.end()));
+            producerConfig.setRegion(matcher.group(1));
+          } else {
+            issues.add(getContext().createConfigIssue(
+                Groups.KINESIS.name(),
+                KINESIS_CONFIG_BEAN + ".endpoint",
+                Errors.KINESIS_19
+            ));
+          }
         } else {
           producerConfig.setRegion(conf.region.getId());
         }

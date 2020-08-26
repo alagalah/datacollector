@@ -24,10 +24,13 @@ import com.streamsets.pipeline.api.HideConfigs;
 import com.streamsets.pipeline.api.PushSource;
 import com.streamsets.pipeline.api.StageDef;
 import com.streamsets.pipeline.api.base.configurablestage.DPushSource;
+import com.streamsets.pipeline.config.DataFormat;
 import com.streamsets.pipeline.lib.dirspooler.SpoolDirConfigBean;
 
+import static com.streamsets.pipeline.config.OriginAvroSchemaSource.SOURCE;
+
 @StageDef(
-    version = 1,
+    version = 2,
     label = "Azure Data Lake Storage Gen2",
     description = "Reads data from Azure Data Lake Storage Gen2",
     icon = "data-lake-store-gen2.png",
@@ -35,8 +38,8 @@ import com.streamsets.pipeline.lib.dirspooler.SpoolDirConfigBean;
     recordsByRef = true,
     resetOffset = true,
     producesEvents = true,
-    onlineHelpRefUrl ="index.html?contextID=task_sh1_d45_rhb",
-    beta = true
+    upgraderDef = "upgrader/DataLakeGen2DSource.yaml",
+    onlineHelpRefUrl ="index.html?contextID=task_sh1_d45_rhb"
 )
 @ConfigGroups(DataLakeGen2SourceGroups.class)
 @HideConfigs(value = {
@@ -44,7 +47,15 @@ import com.streamsets.pipeline.lib.dirspooler.SpoolDirConfigBean;
     "dataLakeGen2SourceConfigBean.hdfsUser",
     "dataLakeGen2SourceConfigBean.hdfsKerberos",
     "dataLakeGen2SourceConfigBean.hdfsConfDir",
-    "dataLakeGen2SourceConfigBean.hdfsConfigs"
+    "dataLakeGen2SourceConfigBean.hdfsConfigs",
+    "conf.allowLateDirectory",
+    "conf.dataFormatConfig.verifyChecksum",
+    "conf.dataFormatConfig.avroSchemaSource",
+    "conf.dataFormatConfig.avroSchema",
+    "conf.dataFormatConfig.schemaRegistryUrls",
+    "conf.dataFormatConfig.schemaLookupMode",
+    "conf.dataFormatConfig.subject",
+    "conf.dataFormatConfig.schemaId"
 })
 @GenerateResourceBundle
 public class DataLakeGen2DSource extends DPushSource {
@@ -57,6 +68,10 @@ public class DataLakeGen2DSource extends DPushSource {
 
   @Override
   protected PushSource createPushSource() {
+    if (conf.dataFormat == DataFormat.AVRO) {
+      conf.dataFormatConfig.avroSchemaSource = SOURCE;
+    }
+
     return new DataLakeGen2Source(conf, dataLakeGen2SourceConfigBean);
   }
 }

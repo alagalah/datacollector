@@ -23,8 +23,10 @@ import com.streamsets.pipeline.api.Batch;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.Target;
 import com.streamsets.pipeline.api.base.BaseTarget;
+import com.streamsets.pipeline.api.service.sshtunnel.SshTunnelService;
 import com.streamsets.pipeline.lib.cache.CacheCleaner;
 import com.streamsets.pipeline.lib.el.ELUtils;
+import com.streamsets.pipeline.lib.jdbc.BasicConnectionString;
 import com.streamsets.pipeline.lib.jdbc.DuplicateKeyAction;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
 import com.streamsets.pipeline.lib.jdbc.JDBCOperationType;
@@ -40,12 +42,15 @@ import com.streamsets.pipeline.lib.operation.ChangeLogFormat;
 import com.streamsets.pipeline.lib.operation.UnsupportedOperationAction;
 import com.streamsets.pipeline.stage.common.DefaultErrorRecordHandler;
 import com.streamsets.pipeline.stage.common.ErrorRecordHandler;
+import com.streamsets.service.sshtunnel.DummySshService;
 import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -57,31 +62,35 @@ public class JdbcTarget extends BaseTarget {
   private static final String HIKARI_CONFIG_PREFIX = "hikariConfigBean.";
   private static final String CONNECTION_STRING = HIKARI_CONFIG_PREFIX + "connectionString";
 
-  private final boolean rollbackOnError;
-  private final boolean useMultiRowOp;
-  private final int maxPrepStmtParameters;
+  protected final boolean rollbackOnError;
+  protected final boolean useMultiRowOp;
+  protected final int maxPrepStmtParameters;
 
-  private final String schemaNameTemplate;
-  private final String tableNameTemplate;
-  private SchemaTableClassifier schemaTableClassifier = null;
-  private final List<JdbcFieldColumnParamMapping> customMappings;
-  private final boolean caseSensitive;
-  private final boolean dynamicSchemaName;
-  private final boolean dynamicTableName;
-  private final List<String> customDataSqlStateCodes;
+  protected final String schemaNameTemplate;
+  protected final String tableNameTemplate;
+  protected SchemaTableClassifier schemaTableClassifier = null;
+  protected final List<JdbcFieldColumnParamMapping> customMappings;
+  protected final boolean caseSensitive;
+  protected final boolean dynamicSchemaName;
+  protected final boolean dynamicTableName;
+  protected final List<String> customDataSqlStateCodes;
 
-  private final ChangeLogFormat changeLogFormat;
+  protected final ChangeLogFormat changeLogFormat;
   private final HikariPoolConfigBean hikariConfigBean;
-  private final CacheCleaner cacheCleaner;
+  protected final CacheCleaner cacheCleaner;
 
-  private ErrorRecordHandler errorRecordHandler;
-  private HikariDataSource dataSource = null;
+  protected ErrorRecordHandler errorRecordHandler;
+  protected HikariDataSource dataSource = null;
 
-  private final int defaultOpCode;
-  private final UnsupportedOperationAction unsupportedAction;
-  private final DuplicateKeyAction duplicateKeyAction;
+  protected final int defaultOpCode;
+  protected final UnsupportedOperationAction unsupportedAction;
+  protected final DuplicateKeyAction duplicateKeyAction;
 
-  private final JdbcUtil jdbcUtil;
+  private SshTunnelService sshTunnelService;
+
+  protected final JdbcUtil jdbcUtil;
+
+  protected boolean tableAutoCreate;
 
   class RecordWriterLoader extends CacheLoader<SchemaAndTable, JdbcRecordWriter> {
     @Override
@@ -100,12 +109,18 @@ public class JdbcTarget extends BaseTarget {
           duplicateKeyAction,
           JdbcRecordReaderWriterFactory.createRecordReader(changeLogFormat),
           caseSensitive,
-          customDataSqlStateCodes
+          customDataSqlStateCodes,
+          getContext()
       );
     }
   }
 
-  private final LoadingCache<SchemaAndTable, JdbcRecordWriter> recordWriters;
+  protected BasicConnectionString getBasicConnectionString() {
+    return new BasicConnectionString(hikariConfigBean.getPatterns(), hikariConfigBean.getConnectionStringTemplate());
+  }
+
+
+  protected LoadingCache<SchemaAndTable, JdbcRecordWriter> recordWriters;
 
   public JdbcTarget(
       final String schemaNameTemplate,
@@ -169,6 +184,7 @@ public class JdbcTarget extends BaseTarget {
     this.dynamicTableName = jdbcUtil.isElString(tableNameTemplate);
     this.dynamicSchemaName = jdbcUtil.isElString(schemaNameTemplate);
     this.customDataSqlStateCodes = customDataSqlStateCodes;
+    this.tableAutoCreate = false;
 
     CacheBuilder cacheBuilder = CacheBuilder.newBuilder()
         .maximumSize(500)
@@ -193,12 +209,34 @@ public class JdbcTarget extends BaseTarget {
     issues = hikariConfigBean.validateConfigs(context, issues);
     errorRecordHandler = new DefaultErrorRecordHandler(context);
 
+    sshTunnelService = getSSHService();
+
+    BasicConnectionString.Info
+        info
+        = getBasicConnectionString().getBasicConnectionInfo(hikariConfigBean.getConnectionString());
+
+    if (info != null) {
+      // basic connection string format
+      SshTunnelService.HostPort target = new SshTunnelService.HostPort(info.getHost(), info.getPort());
+      Map<SshTunnelService.HostPort, SshTunnelService.HostPort>
+          portMapping
+          = sshTunnelService.start(Collections.singletonList(target));
+      SshTunnelService.HostPort tunnel = portMapping.get(target);
+      info = info.changeHostPort(tunnel.getHost(), tunnel.getPort());
+      hikariConfigBean.setConnectionString(getBasicConnectionString().getBasicConnectionUrl(info));
+    } else {
+      // complex connection string format, we don't support this right now with SSH tunneling
+      issues.add(getContext().createConfigIssue("JDBC",
+          "hikariConfigBean.connectionString",
+          hikariConfigBean.getNonBasicUrlErrorCode()
+      ));
+    }
+
     if (dynamicSchemaName || dynamicTableName) {
       schemaTableClassifier = new SchemaTableClassifier(schemaNameTemplate, tableNameTemplate, context);
     }
 
-    ELUtils.validateExpression(
-        schemaNameTemplate,
+    ELUtils.validateExpression(schemaNameTemplate,
         context,
         Groups.JDBC.getLabel(),
         JdbcUtil.SCHEMA_NAME,
@@ -206,8 +244,7 @@ public class JdbcTarget extends BaseTarget {
         issues
     );
 
-    ELUtils.validateExpression(
-        tableNameTemplate,
+    ELUtils.validateExpression(tableNameTemplate,
         context,
         Groups.JDBC.getLabel(),
         JdbcUtil.TABLE_NAME,
@@ -217,14 +254,14 @@ public class JdbcTarget extends BaseTarget {
 
     if (issues.isEmpty() && null == dataSource) {
       try {
-        dataSource = jdbcUtil.createDataSourceForWrite(
-            hikariConfigBean,
+        dataSource = jdbcUtil.createDataSourceForWrite(hikariConfigBean,
             schemaNameTemplate,
             tableNameTemplate,
             caseSensitive,
             issues,
             customMappings,
-            context
+            context,
+            tableAutoCreate
         );
       } catch (StageException e) {
         LOG.error("Could not connect to data source", e);
@@ -238,8 +275,21 @@ public class JdbcTarget extends BaseTarget {
     return issues;
   }
 
+  private SshTunnelService getSSHService() {
+    SshTunnelService declaredSshTunnelService;
+    try {
+      declaredSshTunnelService = getContext().getService(SshTunnelService.class);
+    } catch (RuntimeException e) {
+      declaredSshTunnelService = new DummySshService();
+    }
+    return declaredSshTunnelService;
+  }
+
   @Override
   public void destroy() {
+    if (sshTunnelService != null){
+      sshTunnelService.stop();
+    }
     recordWriters.invalidateAll();
     if (null != dataSource) {
       dataSource.close();
@@ -249,12 +299,17 @@ public class JdbcTarget extends BaseTarget {
 
   @Override
   public void write(Batch batch) throws StageException {
+    sshTunnelService.healthCheck();
+    // jdbc target always commit batch execution
+    write(batch, false);
+  }
+
+  protected void write(Batch batch, boolean perRecord) {
     if (!batch.getRecords().hasNext()) {
       // No records - take the opportunity to clean up the cache so that we don't hold on to memory indefinitely
       cacheCleaner.periodicCleanUp();
+      return;
     }
-    // jdbc target always commit batch execution
-    final boolean perRecord = false;
 
     if (dynamicSchemaName || dynamicTableName)  {
       jdbcUtil.write(
@@ -269,4 +324,5 @@ public class JdbcTarget extends BaseTarget {
       jdbcUtil.write(batch.getRecords(), key, recordWriters, errorRecordHandler, perRecord);
     }
   }
+
 }

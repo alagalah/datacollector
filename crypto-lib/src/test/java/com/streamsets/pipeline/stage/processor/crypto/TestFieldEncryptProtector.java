@@ -23,6 +23,7 @@ package com.streamsets.pipeline.stage.processor.crypto;
 import com.amazonaws.encryptionsdk.CryptoAlgorithm;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
+import com.streamsets.datacollector.credential.ClearCredentialValue;
 import com.streamsets.pipeline.api.Field;
 import com.streamsets.pipeline.api.Processor;
 import com.streamsets.pipeline.api.Record;
@@ -32,7 +33,7 @@ import com.streamsets.pipeline.api.impl.RecordBasedFieldBatch;
 import com.streamsets.pipeline.sdk.ProcessorRunner;
 import com.streamsets.pipeline.sdk.RecordCreator;
 import com.streamsets.pipeline.sdk.StageRunner;
-import jersey.repackaged.com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableList;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -172,7 +173,7 @@ public class TestFieldEncryptProtector {
     decryptConfig.mode = EncryptionMode.DECRYPT;
     decryptConfig.cipher = CryptoAlgorithm.ALG_AES_256_GCM_IV12_TAG16_HKDF_SHA384_ECDSA_P384;
     decryptConfig.fieldPaths = ImmutableList.of("/message", "/long", "/bool");
-    decryptConfig.key = key;
+    decryptConfig.key = new ClearCredentialValue(key);
     decryptConfig.keyId = "keyId";
     decryptConfig.context = aad;
     decryptConfig.maxBytesPerKey = String.valueOf(Long.MAX_VALUE);

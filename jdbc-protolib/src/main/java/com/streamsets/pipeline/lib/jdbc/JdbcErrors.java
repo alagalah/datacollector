@@ -81,7 +81,7 @@ public enum JdbcErrors implements ErrorCode {
   JDBC_56("The default value of '{}' must be in the format '" + JdbcLookupProcessor.DATETIME_FORMAT + "': {}"),
   JDBC_57("Unsupported Multi-Row Operation to SQL Server"),
   JDBC_58("Error processing batch: {}"),
-
+  JDBC_59("Column name in Field to Column Mapping can not be empty"),
   JDBC_60("Cannot Serialize Offset: {}"),
   JDBC_61("Cannot Deserialize Offset: {}"),
   JDBC_62("Table {} does not have a primary or no partition configuration defined."),
@@ -113,6 +113,7 @@ public enum JdbcErrors implements ErrorCode {
   JDBC_87("Interrupted while waiting to read data"),
   JDBC_88("'{}' is not a valid decimal number"),
   JDBC_89("Error while processing batch of records together: {}"),
+  JDBC_90("Record doesn't have any columns for table '{}'"),
 
   JDBC_100("Could not enable partitioning for table {}: {}"),
   JDBC_101("Invalid partition size for table {}: {}"),
@@ -148,6 +149,19 @@ public enum JdbcErrors implements ErrorCode {
   JDBC_409("Offset column can't contain NULL: {}"),
   JDBC_410("Failed to parse column '{}' to field with value {}."),
   JDBC_411("Filter schema values cannot be empty."),
+  JDBC_412("Poll interval (s) '{}' cannot be greater than Batch Time Wait (ms) '{}'"), //Postgres
+  JDBC_413("Could not create the WAL receiver: {}"), //Postgres
+
+  JDBC_500("The JDBC URL must be 'jdbc:<vendor>://<HOST>[:<PORT>][/<DB>]...'"),
+  JDBC_501("Connection must be secured, either by SSL encryption or SSH Tunneling"),
+  JDBC_502("Batch size greater than maximal batch size allowed in sdc.properties, maxBatchSize: {}"),
+
+  JDBC_600("Missing redo log files for SCN range {} to {}"),
+  JDBC_601("Could not find a valid LogMiner dictionary: {}"),
+  JDBC_602("Could not find any redo log file for datetime {}"),
+  JDBC_603("Error while retrieving LogMiner metadata: {}"),
+  JDBC_604("Failed to find a valid SCN >= {}."),
+  JDBC_605("Error while querying the current database time: {}."),
   ;
 
   private final String msg;

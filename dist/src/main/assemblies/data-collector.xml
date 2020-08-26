@@ -131,6 +131,12 @@
       <outputDirectory>/data</outputDirectory>
     </fileSet>
 
+    <!-- sample pipelines dir -->
+    <fileSet>
+      <directory>${basedir}/src/main/samplePipelines</directory>
+      <outputDirectory>/samplePipelines</outputDirectory>
+    </fileSet>
+
     <!-- data collector static web -->
     <fileSet>
       <directory>${sdc.ui.dist-dir}</directory>
@@ -183,13 +189,13 @@
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
 
-    <!-- DataFormants libs -->
+    <!-- Data Formats libs -->
     <fileSet>
       <directory>${basedir}/../dataformats-lib/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
 
-<!-- crypto-lib -->
+    <!-- crypto-lib -->
     <fileSet>
       <directory>${basedir}/../crypto-lib/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
@@ -231,6 +237,12 @@
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
 
+    <!-- orchestrator-lib -->
+    <fileSet>
+      <directory>${basedir}/../orchestrator-lib/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
+
     <!-- rabbitmq-lib -->
     <fileSet>
       <directory>${basedir}/../rabbitmq-lib/target/streamsets-libs/</directory>
@@ -264,6 +276,18 @@
       <directory>${basedir}/../${cdh_6_1-lib}/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
+    <fileSet>
+      <directory>${basedir}/../${cdh_6_2-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
+    <fileSet>
+      <directory>${basedir}/../${cdh_6_3-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
+    <fileSet>
+      <directory>${basedir}/../${cdp_7_1-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
 
     <!-- CDH Spark Kafka lib -->
     <fileSet>
@@ -274,38 +298,22 @@
       <directory>${basedir}/../${cdh-spark_2_3-lib}/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
+    <fileSet>
+      <directory>${basedir}/../${cdh-spark_2_3_r3-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
+    <fileSet>
+      <directory>${basedir}/../${cdh-spark_2_3_r4-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
 
     <!-- HDP Libs -->
-    <fileSet>
-      <directory>${basedir}/../${hdp_2_6-lib}/target/streamsets-libs/</directory>
-      <outputDirectory>/streamsets-libs/</outputDirectory>
-    </fileSet>
-    <fileSet>
-      <directory>${basedir}/../${hdp_2_6_1-hive1-lib}/target/streamsets-libs/</directory>
-      <outputDirectory>/streamsets-libs/</outputDirectory>
-    </fileSet>
-    <fileSet>
-      <directory>${basedir}/../${hdp_2_6_2-hive1-lib}/target/streamsets-libs/</directory>
-      <outputDirectory>/streamsets-libs/</outputDirectory>
-    </fileSet>
-    <fileSet>
-      <directory>${basedir}/../${hdp_2_6-hive2-lib}/target/streamsets-libs/</directory>
-      <outputDirectory>/streamsets-libs/</outputDirectory>
-    </fileSet>
-    <fileSet>
-      <directory>${basedir}/../${hdp_2_6-flume-lib}/target/streamsets-libs/</directory>
-      <outputDirectory>/streamsets-libs/</outputDirectory>
-    </fileSet>
     <fileSet>
       <directory>${basedir}/../${hdp_3_1-lib}/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
 
     <!-- MapR Libs -->
-    <fileSet>
-      <directory>${basedir}/../${mapr_5_2-lib}/target/streamsets-libs/</directory>
-      <outputDirectory>/streamsets-libs/</outputDirectory>
-    </fileSet>
     <fileSet>
       <directory>${basedir}/../${mapr_6_0-lib}/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
@@ -415,6 +423,10 @@
 
     <!-- CDH5 Kafka libs -->
     <fileSet>
+      <directory>${basedir}/../${cdh_kafka_4_1-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
+    <fileSet>
       <directory>${basedir}/../${cdh_kafka_3_1-lib}/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
@@ -482,6 +494,14 @@
       <directory>${basedir}/../${elasticsearch_5-lib}/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
+    <fileSet>
+      <directory>${basedir}/../${elasticsearch_6-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
+    <fileSet>
+      <directory>${basedir}/../${elasticsearch_7-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
 
     <!-- MLeap -->
     <fileSet>
@@ -492,6 +512,10 @@
     <!-- Mongo libs -->
     <fileSet>
       <directory>${basedir}/../${mongodb_3-lib}/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
+    <fileSet>
+      <directory>${basedir}/../${mongodb_4-lib}/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
 
@@ -510,6 +534,12 @@
     <!-- Salesforce -->
     <fileSet>
       <directory>${basedir}/../salesforce-lib/target/streamsets-libs/</directory>
+      <outputDirectory>/streamsets-libs/</outputDirectory>
+    </fileSet>
+
+    <!-- SAP HANA -->
+    <fileSet>
+      <directory>${basedir}/../sap_hana-lib/target/streamsets-libs/</directory>
       <outputDirectory>/streamsets-libs/</outputDirectory>
     </fileSet>
 
@@ -598,7 +628,12 @@
       <scope>compile</scope>
       <includes>
         <include>com.streamsets:streamsets-datacollector-api</include>
+        <include>org.slf4j:slf4j-log4j12</include>
+        <include>log4j:log4j</include>
         <include>org.slf4j:jul-to-slf4j</include>
+        <include>org.bouncycastle:bcprov-jdk15on</include>
+        <include>org.bouncycastle:bcpg-jdk15on</include>
+        <include>org.bouncycastle:bcpkix-jdk15on</include>
       </includes>
     </dependencySet>
 
@@ -624,6 +659,26 @@
       <scope>compile</scope>
       <includes>
         <include>com.streamsets:streamsets-datacollector-container</include>
+        <include>com.streamsets:streamsets-datacollector-metadata-generator</include>
+        <!--
+          !! HACK ALERT !!
+          Including these dependencies explicitly here is the fix for SDC-12541.  The problem is that these particular
+          dependencies (which, at some level, are compile scoped transitive dependencies of container), are
+          being excluded by the assembly plugin. This may be caused by MASSEMBLY-894, or some other issue.
+
+          In any event, the maven-assembly-plugi doesn't provide detailed enough debug output to understand why
+          these artifacts are being excluded. Therefore, we are declaring them explicitly here so they are selected
+          for inclusion by the plugin to fix the problem.
+        -->
+        <include>org.glassfish.jersey.core:jersey-server</include>
+        <include>org.glassfish.jersey.core:jersey-client</include>
+        <include>org.glassfish.jersey.core:jersey-common</include>
+        <include>org.glassfish.jersey.bundles.repackaged:jersey-guava</include>
+        <include>org.glassfish.jersey.media:jersey-media-json-jackson</include>
+        <include>org.glassfish.jersey.ext:jersey-entity-filtering</include>
+        <include>com.fasterxml.jackson.jaxrs:jackson-jaxrs-json-provider</include>
+        <include>com.fasterxml.jackson.jaxrs:jackson-jaxrs-base</include>
+        <include>io.swagger:swagger-annotations</include>
       </includes>
       <excludes>
         <exclude>com.streamsets:streamsets-datacollector-api</exclude>

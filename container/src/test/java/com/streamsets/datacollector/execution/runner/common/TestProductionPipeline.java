@@ -16,6 +16,8 @@
 package com.streamsets.datacollector.execution.runner.common;
 
 import com.codahale.metrics.MetricRegistry;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import com.streamsets.datacollector.blobstore.BlobStoreTask;
 import com.streamsets.datacollector.config.PipelineConfiguration;
 import com.streamsets.datacollector.creation.PipelineConfigBean;
@@ -25,6 +27,7 @@ import com.streamsets.datacollector.execution.StateListener;
 import com.streamsets.datacollector.execution.snapshot.common.SnapshotInfoImpl;
 import com.streamsets.datacollector.execution.snapshot.file.FileSnapshotStore;
 import com.streamsets.datacollector.lineage.LineagePublisherTask;
+import com.streamsets.datacollector.main.BuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.main.RuntimeModule;
 import com.streamsets.datacollector.main.StandaloneRuntimeInfo;
@@ -68,6 +71,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.Mockito;
+import org.powermock.reflect.Whitebox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,6 +101,7 @@ public class TestProductionPipeline {
   private static final String SNAPSHOT_NAME = "snapshot";
   private MetricRegistry runtimeInfoMetrics;
   private RuntimeInfo runtimeInfo;
+  private BuildInfo buildInfo;
   private ProductionPipelineRunner lastCreatedRunner;
 
   // Private enum for this testcase to figure out which pipeline should be used for test
@@ -124,10 +129,16 @@ public class TestProductionPipeline {
   @Before
   public void setUp() {
     runtimeInfoMetrics = new MetricRegistry();
-    runtimeInfo = new StandaloneRuntimeInfo(RuntimeModule.SDC_PROPERTY_PREFIX, runtimeInfoMetrics,
-                                  Arrays.asList(getClass().getClassLoader()));
+    runtimeInfo = new StandaloneRuntimeInfo(
+        RuntimeInfo.SDC_PRODUCT,
+        RuntimeModule.SDC_PROPERTY_PREFIX,
+        runtimeInfoMetrics,
+        Arrays.asList(getClass().getClassLoader())
+    );
     runtimeInfo.init();
     MetricsConfigurator.registerJmxMetrics(runtimeInfoMetrics);
+    buildInfo = Mockito.mock(BuildInfo.class);
+    Mockito.when(buildInfo.getVersion()).thenReturn("3.17.0");
 
     MockStages.setSourceCapture(null);
     MockStages.setPushSourceCapture(null);
@@ -384,6 +395,7 @@ public class TestProductionPipeline {
       REVISION,
       null,
       config,
+      buildInfo,
       runtimeInfo,
       new MetricRegistry(),
       snapshotStore,
@@ -420,6 +432,7 @@ public class TestProductionPipeline {
       REVISION,
       config,
       runtimeInfo,
+      buildInfo,
       MockStages.createStageLibrary(),
       runner,
       null,
@@ -827,6 +840,7 @@ public class TestProductionPipeline {
         REVISION,
         null,
         config,
+        buildInfo,
         runtimeInfo,
         new MetricRegistry(),
         snapshotStore,
@@ -907,4 +921,58 @@ public class TestProductionPipeline {
     future.get();
   }
 
+  @Test
+  public void testShutdownTransitions() throws Exception {
+    ProductionPipeline pipeline = createProductionPipeline(DeliveryGuarantee.AT_LEAST_ONCE, false, PipelineType.DEFAULT);
+    List<PipelineStatus> transitionHistory = Lists.newArrayList();
+    StateListener stateListener = new StateListener() {
+      @Override
+      public void stateChanged(PipelineStatus pipelineStatus, String message, Map<String, Object> attributes)
+              throws PipelineRuntimeException {
+        transitionHistory.add(pipelineStatus);
+      }
+    };
+    pipeline.registerStatusListener(stateListener);
+    pipeline.run();
+
+    Assert.assertEquals(ImmutableList.of(
+            PipelineStatus.RUNNING,
+            PipelineStatus.FINISHING,
+            PipelineStatus.FINISHED
+    ), transitionHistory);
+  }
+
+  @Test
+  public void testShutdownTransitionsErrorOnDestroy() throws Exception {
+    ProductionPipeline pipeline = createProductionPipeline(DeliveryGuarantee.AT_LEAST_ONCE, false, PipelineType.DEFAULT);
+    List<PipelineStatus> transitionHistory = Lists.newArrayList();
+    StateListener stateListener = new StateListener() {
+      @Override
+      public void stateChanged(PipelineStatus pipelineStatus, String message, Map<String, Object> attributes)
+              throws PipelineRuntimeException {
+        transitionHistory.add(pipelineStatus);
+      }
+    };
+    pipeline.registerStatusListener(stateListener);
+    Pipeline origInnerPipeline = Whitebox.getInternalState(pipeline, "pipeline");
+    Pipeline spyInnerPipeline = Mockito.spy(origInnerPipeline);
+    RuntimeException testException = new RuntimeException("test exception");
+    try {
+      Whitebox.setInternalState(pipeline, "pipeline", spyInnerPipeline);
+      Mockito.doThrow(testException).when(spyInnerPipeline)
+              .destroy(Mockito.anyBoolean(), Mockito.any());
+      pipeline.run();
+      Assert.fail("expected exception");
+    } catch (RuntimeException e) {
+      Assert.assertSame(testException, e);
+    } finally {
+      Whitebox.setInternalState(pipeline, origInnerPipeline);
+    }
+    Assert.assertEquals(ImmutableList.of(
+            PipelineStatus.RUNNING,
+            PipelineStatus.FINISHING,
+            PipelineStatus.STOPPING_ERROR,
+            PipelineStatus.RETRY
+    ), transitionHistory);
+  }
 }

@@ -21,6 +21,10 @@
     overflow: auto;
   }
 
+  .empty-value {
+    display: inline-block;
+    padding: 5px;
+  }
 
   .tabs-content {
     //border-left: 1px solid #ddd;
@@ -123,6 +127,51 @@
     margin-top: 20px;
     opacity: 0.5;
     font-size: 12px;
+  }
+
+  .cron-gen-container {
+    .tab-pane {
+      p {
+        visibility: hidden;
+      }
+    }
+  }
+
+  .confirm-check {
+    color: @brand-success;
+  }
+
+  .cancel-x {
+    color: @brand-danger;
+  }
+
+  .secret-file-configuration {
+    .file-upload-mixin();
+  }
+
+  .show-advanced-button {
+    .tooltip-wrapper {
+      padding: 0;
+      @media (min-width: 1092px) {
+        text-align: right;
+      }
+      .btn[disabled] {
+        /* don't let button block mouse events from reaching wrapper */
+        pointer-events: none;
+        cursor: not-allowed;
+      }
+    }
+    .tooltip-wrapper.disabled {
+      /* pointer-events setting above blocks cursor setting, so set it here */
+      cursor: not-allowed;
+    }
+    .btn {
+      padding-left: 14px;
+      padding-right: 14px;
+      i {
+        padding-left: 5px;
+      }
+    }
   }
 }
 

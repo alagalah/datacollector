@@ -30,8 +30,9 @@ import com.streamsets.pipeline.api.lineage.EndPointType;
 import com.streamsets.pipeline.api.lineage.LineageEvent;
 import com.streamsets.pipeline.api.lineage.LineageEventType;
 import com.streamsets.pipeline.api.lineage.LineageSpecificAttribute;
-import com.streamsets.pipeline.lib.event.EventCreator;
+import com.streamsets.pipeline.api.service.sshtunnel.SshTunnelService;
 import com.streamsets.pipeline.lib.event.NoMoreDataEvent;
+import com.streamsets.pipeline.lib.jdbc.BasicConnectionString;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
 import com.streamsets.pipeline.lib.jdbc.JdbcErrors;
 import com.streamsets.pipeline.lib.jdbc.JdbcUtil;
@@ -41,6 +42,7 @@ import com.streamsets.pipeline.lib.jdbc.UtilsProvider;
 import com.streamsets.pipeline.lib.util.ThreadUtil;
 import com.streamsets.pipeline.stage.common.DefaultErrorRecordHandler;
 import com.streamsets.pipeline.stage.common.ErrorRecordHandler;
+import com.streamsets.service.sshtunnel.DummySshService;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -68,11 +70,11 @@ public class JdbcSource extends BaseSource {
 
   private static final String HIKARI_CONFIG_PREFIX = "hikariConfigBean.";
   private static final String CONNECTION_STRING = HIKARI_CONFIG_PREFIX + "connectionString";
-  private static final String QUERY = "query";
-  private static final String TIMESTAMP = "timestamp";
-  private static final String ERROR = "error";
-  private static final String ROW_COUNT = "rows";
-  private static final String SOURCE_OFFSET = "offset";
+  public static final String QUERY = "query";
+  public static final String TIMESTAMP = "timestamp";
+  public static final String ERROR = "error";
+  public static final String ROW_COUNT = "rows";
+  public static final String SOURCE_OFFSET = "offset";
   private static final String OFFSET_COLUMN = "offsetColumn";
   private static final String INITIAL_OFFSET = "initialOffset";
   private static final String QUERY_INTERVAL_EL = "queryInterval";
@@ -80,19 +82,6 @@ public class JdbcSource extends BaseSource {
   private static final String TXN_MAX_SIZE = "txnMaxSize";
   private static final String JDBC_NS_HEADER_PREFIX = "jdbcNsHeaderPrefix";
   private static final HashFunction HF = Hashing.sha256();
-  private static final EventCreator QUERY_SUCCESS = new EventCreator.Builder("jdbc-query-success", 1)
-      .withRequiredField(QUERY)
-      .withRequiredField(TIMESTAMP)
-      .withRequiredField(ROW_COUNT)
-      .withRequiredField(SOURCE_OFFSET)
-      .build();
-  private static final EventCreator QUERY_FAILURE = new EventCreator.Builder("jdbc-query-failure", 1)
-      .withRequiredField(QUERY)
-      .withRequiredField(TIMESTAMP)
-      .withRequiredField(ROW_COUNT)
-      .withRequiredField(SOURCE_OFFSET)
-      .withOptionalField(ERROR)
-      .build();
 
   private final boolean isIncrementalMode;
   private final String query;
@@ -115,7 +104,6 @@ public class JdbcSource extends BaseSource {
   private ResultSet resultSet = null;
   private long lastQueryCompletedTime = 0L;
   private String preparedQuery;
-  private String hashedQuery;
   private int queryRowCount = 0;
   private int numQueryErrors = 0;
   private SQLException firstQueryException = null;
@@ -125,6 +113,9 @@ public class JdbcSource extends BaseSource {
   private boolean firstTime = true;
 
   private final JdbcUtil jdbcUtil;
+  private SshTunnelService sshTunnelService;
+
+  private boolean checkBatchSize = true;
 
   public JdbcSource(
       boolean isIncrementalMode,
@@ -159,6 +150,10 @@ public class JdbcSource extends BaseSource {
     this.unknownTypeAction = unknownTypeAction;
   }
 
+  protected BasicConnectionString getBasicConnectionString() {
+    return new BasicConnectionString(hikariConfigBean.getPatterns(), hikariConfigBean.getConnectionStringTemplate());
+  }
+
   @Override
   protected List<ConfigIssue> init() {
     if (disableValidation) {
@@ -167,6 +162,29 @@ public class JdbcSource extends BaseSource {
 
     List<ConfigIssue> issues = new ArrayList<>();
     Source.Context context = getContext();
+
+    sshTunnelService = getSSHService();
+
+    BasicConnectionString.Info
+        info
+        = getBasicConnectionString().getBasicConnectionInfo(hikariConfigBean.getConnectionString());
+
+    if (info != null) {
+      // basic connection string format
+      SshTunnelService.HostPort target = new SshTunnelService.HostPort(info.getHost(), info.getPort());
+      Map<SshTunnelService.HostPort, SshTunnelService.HostPort>
+          portMapping
+          = sshTunnelService.start(Collections.singletonList(target));
+      SshTunnelService.HostPort tunnel = portMapping.get(target);
+      info = info.changeHostPort(tunnel.getHost(), tunnel.getPort());
+      hikariConfigBean.setConnectionString(getBasicConnectionString().getBasicConnectionUrl(info));
+    } else {
+      // complex connection string format, we don't support this right now with SSH tunneling
+      issues.add(getContext().createConfigIssue("JDBC",
+          "hikariConfigBean.connectionString",
+          hikariConfigBean.getNonBasicUrlErrorCode()
+      ));
+    }
 
     errorRecordHandler = new DefaultErrorRecordHandler(context);
     issues = hikariConfigBean.validateConfigs(context, issues);
@@ -178,7 +196,7 @@ public class JdbcSource extends BaseSource {
     issues = commonSourceConfigBean.validateConfigs(context, issues);
 
     // Incremental mode have special requirements for the query form
-    if(isIncrementalMode) {
+    if (isIncrementalMode) {
       if (StringUtils.isEmpty(offsetColumn)) {
         issues.add(context.createConfigIssue(Groups.JDBC.name(), OFFSET_COLUMN, JdbcErrors.JDBC_51, "Can't be empty"));
       }
@@ -187,7 +205,8 @@ public class JdbcSource extends BaseSource {
       }
 
       final String formattedOffsetColumn = Pattern.quote(offsetColumn.toUpperCase());
-      Pattern offsetColumnInWhereAndOrderByClause = Pattern.compile(String.format("(?s).*\\bWHERE\\b.*(\\b%s\\b).*\\bORDER BY\\b.*\\b%s\\b.*",
+      Pattern offsetColumnInWhereAndOrderByClause = Pattern.compile(String.format("(?s).*\\bWHERE\\b.*(\\b%s\\b)" +
+              ".*\\bORDER BY\\b.*\\b%s\\b.*",
           formattedOffsetColumn,
           formattedOffsetColumn
       ));
@@ -233,54 +252,65 @@ public class JdbcSource extends BaseSource {
       return issues;
     }
 
-    try (Connection validationConnection = dataSource.getConnection()) { // NOSONAR
-      DatabaseMetaData dbMetadata = validationConnection.getMetaData();
-      // If CDC is enabled, scrollable cursors must be supported by JDBC driver.
-      supportsScrollableCursor(issues, context, dbMetadata);
-      try (Statement statement = validationConnection.createStatement()) {
-        statement.setFetchSize(1);
-        statement.setMaxRows(1);
-        final String preparedQuery = prepareQuery(query, initialOffset);
-        executeValidationQuery(issues, context, statement, preparedQuery);
+    if(!disableValidation) {
+      try (Connection validationConnection = dataSource.getConnection()) { // NOSONAR
+        DatabaseMetaData dbMetadata = validationConnection.getMetaData();
+        // If CDC is enabled, scrollable cursors must be supported by JDBC driver.
+        supportsScrollableCursor(issues, context, dbMetadata);
+        try (Statement statement = validationConnection.createStatement()) {
+          statement.setFetchSize(1);
+          statement.setMaxRows(1);
+          final String preparedQuery = prepareQuery(query, initialOffset);
+          executeValidationQuery(issues, context, statement, preparedQuery);
+        }
+      } catch (SQLException e) {
+        String formattedError = jdbcUtil.formatSqlException(e);
+        LOG.error(formattedError);
+        LOG.debug(formattedError, e);
+        issues.add(context.createConfigIssue(Groups.JDBC.name(), CONNECTION_STRING, JdbcErrors.JDBC_00, formattedError));
       }
-    } catch (SQLException e) {
-      String formattedError = jdbcUtil.formatSqlException(e);
-      LOG.error(formattedError);
-      LOG.debug(formattedError, e);
-      issues.add(context.createConfigIssue(Groups.JDBC.name(), CONNECTION_STRING, JdbcErrors.JDBC_00, formattedError));
     }
 
-    LineageEvent event = getContext().createLineageEvent(LineageEventType.ENTITY_READ);
-    // TODO: add the per-event specific details here.
-    event.setSpecificAttribute(LineageSpecificAttribute.DESCRIPTION, query);
-    event.setSpecificAttribute(LineageSpecificAttribute.ENDPOINT_TYPE, EndPointType.JDBC.name());
-    Map<String, String> props = new HashMap<>();
-    props.put("Connection String", hikariConfigBean.getConnectionString());
-    props.put("Offset Column", offsetColumn);
-    props.put("Is Incremental Mode", isIncrementalMode ? "true" : "false");
-    if (!StringUtils.isEmpty(tableNames)) {
-      event.setSpecificAttribute(
-          LineageSpecificAttribute.ENTITY_NAME,
-          hikariConfigBean.getConnectionString() +
-          " " +
-          tableNames
-      );
-      props.put("Table Names", tableNames);
+    if(issues.isEmpty()) {
+      LineageEvent event = getContext().createLineageEvent(LineageEventType.ENTITY_READ);
+      // TODO: add the per-event specific details here.
+      event.setSpecificAttribute(LineageSpecificAttribute.DESCRIPTION, query);
+      event.setSpecificAttribute(LineageSpecificAttribute.ENDPOINT_TYPE, EndPointType.JDBC.name());
+      Map<String, String> props = new HashMap<>();
+      props.put("Connection String", hikariConfigBean.getConnectionString());
+      props.put("Offset Column", offsetColumn);
+      props.put("Is Incremental Mode", isIncrementalMode ? "true" : "false");
+      if (!StringUtils.isEmpty(tableNames)) {
+        event.setSpecificAttribute(LineageSpecificAttribute.ENTITY_NAME,
+            hikariConfigBean.getConnectionString() + " " + tableNames
+        );
+        props.put("Table Names", tableNames);
 
-    } else {
-      event.setSpecificAttribute(LineageSpecificAttribute.ENTITY_NAME, hikariConfigBean.getConnectionString());
+      } else {
+        event.setSpecificAttribute(LineageSpecificAttribute.ENTITY_NAME, hikariConfigBean.getConnectionString());
+      }
 
+      for (final String n : driverProps.stringPropertyNames()) {
+        props.put(n, driverProps.getProperty(n));
+      }
+      event.setProperties(props);
+      getContext().publishLineageEvent(event);
     }
 
-    for (final String n : driverProps.stringPropertyNames()) {
-      props.put(n, driverProps.getProperty(n));
-    }
-    event.setProperties(props);
-    getContext().publishLineageEvent(event);
     shouldFire = true;
     firstTime = true;
 
     return issues;
+  }
+
+  private SshTunnelService getSSHService() {
+    SshTunnelService declaredSshTunnelService;
+    try {
+      declaredSshTunnelService = getContext().getService(SshTunnelService.class);
+    } catch (RuntimeException e) {
+      declaredSshTunnelService = new DummySshService();
+    }
+    return declaredSshTunnelService;
   }
 
   private void supportsScrollableCursor(
@@ -340,12 +370,24 @@ public class JdbcSource extends BaseSource {
     closeQuietly(resultSet);
     closeQuietly(connection);
     closeQuietly(dataSource);
+    if (sshTunnelService != null){
+      sshTunnelService.stop();
+    }
     super.destroy();
   }
 
+  protected String getPreparedQuery() {
+    return preparedQuery;
+  }
+
   @Override
-  public String produce(String lastSourceOffset, int maxBatchSize, BatchMaker batchMaker) throws StageException {
+  public String produce(String lastSourceOffset, int maxBatchSize, BatchMaker batchMaker) {
     int batchSize = Math.min(this.commonSourceConfigBean.maxBatchSize, maxBatchSize);
+    if (!getContext().isPreview() && checkBatchSize && commonSourceConfigBean.maxBatchSize > maxBatchSize) {
+      getContext().reportError(JdbcErrors.JDBC_502, maxBatchSize);
+      checkBatchSize = false;
+    }
+
     String nextSourceOffset = lastSourceOffset == null ? initialOffset : lastSourceOffset;
 
     long now = System.currentTimeMillis();
@@ -357,19 +399,20 @@ public class JdbcSource extends BaseSource {
       ThreadUtil.sleep(Math.min(delay, 1000));
     } else {
       Statement statement = null;
+      sshTunnelService.healthCheck();
       Hasher hasher = HF.newHasher();
       try {
         if (null == resultSet || resultSet.isClosed()) {
           // The result set got closed outside of us, so we also clean up the connection (if any)
           closeQuietly(connection);
+          connection = getProduceConnection();
 
-          connection = dataSource.getConnection();
-
+          preparedQuery = prepareQuery(query, lastSourceOffset);
           if (!txnColumnName.isEmpty()) {
             // CDC requires scrollable cursors.
-            statement = connection.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
+            statement = getStatement(connection, ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
           } else {
-            statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+            statement = getStatement(connection, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
           }
 
           int fetchSize = batchSize;
@@ -384,11 +427,11 @@ public class JdbcSource extends BaseSource {
           if (getContext().isPreview()) {
             statement.setMaxRows(batchSize);
           }
-          preparedQuery = prepareQuery(query, lastSourceOffset);
-          LOG.trace("Executing query: " + preparedQuery);
-          hashedQuery = hasher.putString(preparedQuery, Charsets.UTF_8).hash().toString();
-          LOG.debug("Executing query: " + hashedQuery);
-          resultSet = statement.executeQuery(preparedQuery);
+
+          LOG.trace("Executing query: {}", preparedQuery);
+          String hashedQuery = hasher.putString(preparedQuery, Charsets.UTF_8).hash().toString();
+          LOG.debug("Executing query: {}", hashedQuery);
+          resultSet = executeQuery(statement, preparedQuery);
           queryRowCount = 0;
           numQueryErrors = 0;
           firstQueryException = null;
@@ -431,7 +474,10 @@ public class JdbcSource extends BaseSource {
           ++noMoreDataRecordCount;
           shouldFire = true;
         }
-        LOG.debug("Processed rows: " + rowCount);
+
+        if (LOG.isDebugEnabled()){
+          LOG.debug("Processed rows: {}", rowCount);
+        }
 
         if (!haveNext || rowCount == 0) {
           // We didn't have any data left in the cursor. Close everything
@@ -444,7 +490,7 @@ public class JdbcSource extends BaseSource {
           closeQuietly(connection);
           lastQueryCompletedTime = System.currentTimeMillis();
           LOG.debug("Query completed at: {}", lastQueryCompletedTime);
-          QUERY_SUCCESS.create(getContext())
+          JDBCQuerySuccessEvent.EVENT_CREATOR.create(getContext())
               .with(QUERY, preparedQuery)
               .with(TIMESTAMP, lastQueryCompletedTime)
               .with(ROW_COUNT, queryRowCount)
@@ -488,7 +534,7 @@ public class JdbcSource extends BaseSource {
         }
         closeQuietly(connection);
         lastQueryCompletedTime = System.currentTimeMillis();
-        QUERY_FAILURE.create(getContext())
+        JDBCQueryFailureEvent.EVENT_CREATOR.create(getContext())
             .with(QUERY, preparedQuery)
             .with(TIMESTAMP, lastQueryCompletedTime)
             .with(ERROR, formattedError)
@@ -508,6 +554,18 @@ public class JdbcSource extends BaseSource {
       }
     }
     return nextSourceOffset;
+  }
+
+  protected ResultSet executeQuery(Statement statement, String preparedQuery) throws SQLException {
+    return statement.executeQuery(preparedQuery);
+  }
+
+  protected Statement getStatement(Connection connection, int resultSetType, int resultSetConcurrency) throws SQLException {
+    return connection.createStatement(resultSetType, resultSetConcurrency);
+  }
+
+  protected Connection getProduceConnection() throws SQLException {
+    return dataSource.getConnection();
   }
 
   private void generateNoMoreDataEvent() {
@@ -541,7 +599,7 @@ public class JdbcSource extends BaseSource {
     return query.replaceAll("\\$\\{(offset|OFFSET)}", offset);
   }
 
-  private Record processRow(ResultSet resultSet, long rowCount) throws SQLException, StageException {
+  protected Record processRow(ResultSet resultSet, long rowCount) throws SQLException {
     Source.Context context = getContext();
     ResultSetMetaData md = resultSet.getMetaData();
     int numColumns = md.getColumnCount();
@@ -578,7 +636,7 @@ public class JdbcSource extends BaseSource {
       record.set(Field.create(row));
     }
     if (createJDBCNsHeaders) {
-      jdbcUtil.setColumnSpecificHeaders(record, Collections.<String>emptySet(), md, jdbcNsHeaderPrefix);
+      jdbcUtil.setColumnSpecificHeaders(record, Collections.emptySet(), md, jdbcNsHeaderPrefix);
     }
     // We will add cdc operation type to record header even if createJDBCNsHeaders is false
     // we currently support CDC on only MS SQL.

@@ -21,7 +21,8 @@
         "restart": "Restart",
         "shutdown": "Shutdown",
         "statsOptIn": "Stat collection Opt In/Out",
-        "usersAndGroups": "Users & Groups"
+        "usersAndGroups": "Users & Groups",
+        "activation": "Activation"
       },
       "clusterManager": "Cluster Manager",
       "dpm": "StreamSets Control Hub",
@@ -35,7 +36,6 @@
         "useHelp": "Help:",
         "localHelp": "Local Help",
         "hostedHelp": "Hosted Help",
-        "register": "Register",
         "restFulAPI": "RESTful API",
         "settings": "Settings",
         "supportBundle": "Support Bundle"
@@ -59,6 +59,7 @@
       "changeRule": "Change Rule",
       "captured": "Captured",
       "close": "Close",
+      "completed": "Completed",
       "condition": "Condition",
       "create": "Create",
       "creating": "Creating...",
@@ -75,6 +76,7 @@
       "duplicate": "Duplicate",
       "duplicating": "Duplicating...",
       "duplicateStage": "Duplicate Stage",
+      "duration": "Duration",
       "download": "Download",
       "downloading": "Downloading...",
       "edit": "Edit",
@@ -113,6 +115,7 @@
       "id": "ID",
       "import": "Import",
       "importing": "Importing...",
+      "input": "Input",
       "install": "Install",
       "installing": "Installing...",
       "isOwner": "Is owner",
@@ -139,6 +142,7 @@
       "noRecords": "No Records to view.",
       "numberOfCopies": "Number of Copies",
       "os": "Operating System",
+      "output": "Output",
       "outputRecord": "Output Record",
       "owner": "Owner",
       "parameters": "Parameters",
@@ -160,6 +164,7 @@
       "restart": "Restart Data Collector",
       "read": "Read",
       "revertChanges": "Revert Data Changes",
+      "runCount": "Run Count",
       "sampleRecords": "Sample Records",
       "sampleValue": "Sample Value",
       "save": "Save",
@@ -173,6 +178,7 @@
       "stage": "Stage",
       "stages": "Stages",
       "stageErrors": "Stage Errors",
+      "started": "Started",
       "state": "State",
       "status": "Status",
       "step": "Run With Changes",
@@ -256,7 +262,7 @@
     "statsOptIn": {
       "headerLabel": "Usage Statistics",
       "headerTitle": "Improve Data Collector with Usage Statistics",
-      "optInLabel": "Improve Data Collector by sending anonymized usage data."
+      "optInLabel": "Share usage data with StreamSets"
     },
     "commitPipelineHistory": {
       "committer": "Committed By",
@@ -393,6 +399,7 @@
       "viewStackTrace": "View Details"
     },
     "detailPane": {
+      "advancedIssuesNeedFix": "Advanced issues must be fixed before advanced options can be hidden",
       "alerts": "Alerts",
       "batchesPerSecond": "( batches / sec )",
       "emailIDs": "Email IDs",
@@ -481,7 +488,7 @@
       "monitoringJSONData": "Pipeline Monitoring",
       "notifications": "Notifications",
       "noStageDefinitionFound": "Could not find stage definition for stage name: {{stageName}}, library: {{library}}",
-      "legacyStageLibFound": "Stage library '{{library}}' is now a legacy stage library and must be installed as a custom stage library.",
+      "legacyStageLibFound": "Stage library '{{library}}' is a legacy library and must be installed separately.",
       "pipelineConfigJSONData": "Pipeline Configuration",
       "pipelinePreviewJSONData": "Preview Data",
       "pipelineRulesJSONData": "Pipeline Rules",
@@ -609,10 +616,12 @@
     },
     "previewPane": {
       "batchSize": "Preview Batch Size",
+      "batchSizeTooltip": "Number of records to use in the preview",
       "cancelPreview": "Cancel Preview",
       "configTitle": "Preview Configuration",
       "configuredSource": "Configured Origin",
       "previewSource": "Preview Source",
+      "previewSourceTooltip": "Source data to use for the preview",
       "previewStage": "Preview Stage",
       "previewSingleStage": "Preview Single Stage",
       "previewMultipleStages": "Preview Multiple Stages",
@@ -624,7 +633,7 @@
       "rawPreviewData": {
         "modalTitle": "Raw Preview Data"
       },
-      "rememberMe": "Remember the configuration",
+      "rememberMe": "Remember the Configuration",
       "runPreview": "Run Preview",
       "showFieldType": "Show Field Type",
       "showHeader": "Show Record/Field Header",
@@ -637,8 +646,8 @@
       "timeout": "Preview Timeout (in milliseconds)",
       "writeToDestinations": "Write to Destinations and Executors",
       "writeToDestinationsTooltip": "Writes preview data to destination systems (both executors and destinations)",
-      "executeLifecycleEvents": "Execute pipeline lifecycle events.",
-      "executeLifecycleEventsTooltip": "Generates and processes pipeline lifecycle events as the pipeline would be normally running.",
+      "executeLifecycleEvents": "Execute Pipeline Lifecycle Events",
+      "executeLifecycleEventsTooltip": "Generates and processes pipeline lifecycle events",
       "userProvider": "User Provided"
     },
     "library": {
@@ -664,6 +673,7 @@
       "selectUsersAndGroupsPlaceholder": "Select users and groups...",
       "sourcePlaceholder":"Select Origin...",
       "system:allPipelines" : "All Pipelines",
+      "system:samplePipelines" : "Sample Pipelines",
       "system:edgePipelines" : "Edge Pipelines",
       "system:publishedPipelines": "Published Pipelines",
       "system:dpmControlledPipelines": "Control Hub Controlled Pipelines",
@@ -799,7 +809,7 @@
   },
   "about": {
     "builtBy": "built by",
-    "copyrightText": "Copyright &copy; 2018 StreamSets, Inc. All rights reserved.",
+    "copyrightText": "Copyright &copy; 2020 StreamSets, Inc. All rights reserved.",
     "on": "on",
     "productName": "StreamSets Data Collector",
     "title": "About",
@@ -874,9 +884,9 @@
       "uninstall": "Uninstall"
     },
     "install": {
-      "confirmationMessage": "Are you sure you want to install the following stage libraries?",
+      "confirmationMessage": "The following libraries will be installed.",
       "successMessage": "Successfully installed stage libraries. Restart the Data Collector for the changes to take effect.",
-      "title": "Install Stage Library"
+      "title": "Install Stage Libraries"
     },
     "manifestURL": "Manifest URL",
     "noStageLibrary": "No Stage Library Found",
@@ -907,6 +917,7 @@
     "value": "Value"
   },
   "sdcSettings": {
+    "dontShowMissingStages": "Hide missing stage library stages inside the pipeline canvas > stage library list",
     "title": "Settings",
     "helpBar": "Hide Pipeline Creation Help Bar",
     "lineWrapping": "Wrap long lines in properties",
@@ -917,7 +928,7 @@
     "description": "Description",
     "downloadingMessage" : "Downloading support bundle...",
     "generator": "Generator",
-    "infoMessage": "The support bundle allows you to generate an archive file with the information required to troubleshoot various issues with the Data Collector. Please select one or more generators to be included in the archive. Then you can either Download the archive file for review, or Upload it directly to StreamSets.",
+    "infoMessage": "The support bundle allows you to generate an archive file with the information required to troubleshoot various issues with the Data Collector. Please select one or more generators to be included in the archive. Then you can Download the archive file for review and, if necessary, upload it to StreamSets as an attachment in your support ticket.",
     "title": "Support Bundle",
     "uploadedMessage" : "Support bundle was successfully uploaded."
   },
@@ -932,6 +943,6 @@
     "staticWebDir": "Static Web Directory"
   },
   "usersAndGroups": {
-    "title": "Users And Groups"
+    "title": "Users and Groups"
   }
 }

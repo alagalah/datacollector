@@ -25,9 +25,11 @@ import com.streamsets.pipeline.api.ExecutionMode;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.StageUpgrader;
 import com.streamsets.pipeline.api.impl.Utils;
+import com.streamsets.pipeline.lib.googlecloud.GoogleCloudConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -36,6 +38,8 @@ import java.util.stream.Collectors;
 
 public class PipelineConfigUpgrader implements StageUpgrader {
   private static final Logger LOG = LoggerFactory.getLogger(PipelineConfigUpgrader.class);
+  public static final String GOOGLE_CLOUD_CONFIG_PREFIX = "googleCloudConfig.";
+  public static final String GOOGLE_CLOUD_CREDENTIALS_CONFIG_PREFIX = "googleCloudCredentialsConfig.";
 
   @Override
   public List<Config> upgrade(List<Config> configs, Context context) throws StageException {
@@ -80,6 +84,21 @@ public class PipelineConfigUpgrader implements StageUpgrader {
         // fall through
       case 13:
         upgradeV13ToV14(configs);
+        // fall through
+      case 14:
+        upgradeV14ToV15(configs);
+        // fall through
+      case 15:
+        upgradeV15ToV16(configs);
+        // fall through
+      case 16:
+        upgradeV16ToV17(configs);
+        // fall through
+      case 17:
+        upgradeV17ToV18(configs);
+        // fall through
+      case 18:
+        upgradeV18ToV19(configs);
         break;
       default:
         throw new IllegalStateException(Utils.format("Unexpected fromVersion {}", context.getFromVersion()));
@@ -207,33 +226,9 @@ public class PipelineConfigUpgrader implements StageUpgrader {
 
   private void addAmazonEmrConfigs(List<Config> configs) {
     String amazonEmrConfigPrefix = "amazonEMRConfig.";
-    configs.add(new Config("logLevel", "INFO"));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.USER_REGION, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.USER_REGION_CUSTOM, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.S3_STAGING_URI, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.CLUSTER_PREFIX, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.CLUSTER_ID, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.TERMINATE_CLUSTER, false));
+    addEmrConfigs(configs, amazonEmrConfigPrefix);
     configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.ENABLE_EMR_DEBUGGING, true));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.S3_LOG_URI, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SERVICE_ROLE, AmazonEMRConfig.SERVICE_ROLE_DEFAULT));
-    configs.add(new Config(
-        amazonEmrConfigPrefix + AmazonEMRConfig.JOB_FLOW_ROLE,
-        AmazonEMRConfig.JOB_FLOW_ROLE_DEFAULT
-    ));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.VISIBLE_TO_ALL_USERS, true));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.LOGGING_ENABLED, true));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.EC2_SUBNET_ID, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.MASTER_SECURITY_GROUP, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SLAVE_SECURITY_GROUP, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.INSTANCE_COUNT, 2));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.MASTER_INSTANCE_TYPE, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SLAVE_INSTANCE_TYPE, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.MASTER_INSTANCE_TYPE_CUSTOM, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SLAVE_INSTANCE_TYPE_CUSTOM, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.ACCESS_KEY, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SECRET_KEY, null));
-    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.PROVISION_NEW_CLUSTER, false));
+    configs.add(new Config("logLevel", "INFO"));
   }
 
   private final static Set<String> PROPERTIES_TO_CHECK_FOR_CUSTOM =
@@ -294,6 +289,92 @@ public class PipelineConfigUpgrader implements StageUpgrader {
     configs.add(new Config("databricksConfig.provisionNewCluster", true));
     configs.add(new Config("databricksConfig.clusterId", null));
     configs.add(new Config("databricksConfig.terminateCluster", false));
+  }
+
+  private void upgradeV14ToV15(List<Config> configs) {
+    configs.add(new Config("ludicrousMode", false));
+    configs.add(new Config("ludicrousModeInputCount", false));
+    configs.add(new Config("advancedErrorHandling", false));
+    configs.add(new Config("triggerInterval", 2000));
+  }
+
+  private void upgradeV15ToV16(List<Config> configs) {
+    configs.add(new Config("preprocessScript", ""));
+  }
+
+  private void upgradeV16ToV17(List<Config> configs) {
+    String amazonEmrConfigPrefix = "transformerEMRConfig.";
+    addEmrConfigs(configs, amazonEmrConfigPrefix);
+    configs.add(new Config(amazonEmrConfigPrefix + "useIAMRoles", false));
+    configs.add(new Config("clusterConfig.callbackUrl", null));
+  }
+
+  private void upgradeV17ToV18(List<Config> configs) {
+    configs.add(new Config("transformerEMRConfig.serviceAccessSecurityGroup", null));
+  }
+
+  private void upgradeV18ToV19(List<Config> configs) {
+    addDataprocConfigs(configs);
+  }
+
+  private void addEmrConfigs(List<Config> configs, String amazonEmrConfigPrefix) {
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.USER_REGION, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.USER_REGION_CUSTOM, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.S3_STAGING_URI, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.CLUSTER_PREFIX, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.CLUSTER_ID, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.TERMINATE_CLUSTER, false));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.S3_LOG_URI, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SERVICE_ROLE, AmazonEMRConfig.SERVICE_ROLE_DEFAULT));
+    configs.add(new Config(
+      amazonEmrConfigPrefix + AmazonEMRConfig.JOB_FLOW_ROLE,
+      AmazonEMRConfig.JOB_FLOW_ROLE_DEFAULT
+    ));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.VISIBLE_TO_ALL_USERS, true));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.LOGGING_ENABLED, true));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.EC2_SUBNET_ID, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.MASTER_SECURITY_GROUP, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SLAVE_SECURITY_GROUP, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.INSTANCE_COUNT, 2));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.MASTER_INSTANCE_TYPE, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SLAVE_INSTANCE_TYPE, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.MASTER_INSTANCE_TYPE_CUSTOM, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SLAVE_INSTANCE_TYPE_CUSTOM, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.ACCESS_KEY, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.SECRET_KEY, null));
+    configs.add(new Config(amazonEmrConfigPrefix + AmazonEMRConfig.PROVISION_NEW_CLUSTER, false));
+  }
+
+  private static void addDataprocConfigs(List<Config> configs) {
+    addGCloudConfig(configs,"region", null);
+    addGCloudConfig(configs, "customRegion", null);
+    addGCloudConfig(configs, "gcsStagingUri", null);
+    addGCloudConfig(configs, "create", false);
+    addGCloudConfig(configs, "clusterPrefix", null);
+    addGCloudConfig(configs, "version", GoogleCloudConfig.DATAPROC_IMAGE_VERSION_DEFAULT);
+    addGCloudConfig(configs, "masterType", null);
+    addGCloudConfig(configs, "workerType", null);
+    addGCloudConfig(configs, "networkType", null);
+    addGCloudConfig(configs, "network", null);
+    addGCloudConfig(configs, "subnet", null);
+    addGCloudConfig(configs, "tags", new ArrayList<String>());
+    addGCloudConfig(configs, "workerCount", 2);
+    addGCloudConfig(configs, "clusterName", null);
+    addGCloudConfig(configs, "terminate", false);
+
+    addGCloudCredentialConfig(configs, "projectId");
+    addGCloudCredentialConfig(configs, "credentialsProvider");
+    addGCloudCredentialConfig(configs, "path");
+    addGCloudCredentialConfig(configs, "credentialsFileContent");
+
+  }
+
+  private static void addGCloudConfig(List<Config> configs, String key, Object value) {
+    configs.add(new Config(GOOGLE_CLOUD_CONFIG_PREFIX + key, value));
+  }
+
+  private static void addGCloudCredentialConfig(List<Config> configs, String key) {
+    configs.add(new Config(GOOGLE_CLOUD_CREDENTIALS_CONFIG_PREFIX + key, null));
   }
 
 }

@@ -18,12 +18,11 @@ package com.streamsets.pipeline.stage.origin.s3;
 import com.amazonaws.services.s3.AmazonS3;
 import com.streamsets.pipeline.api.ConfigDef;
 import com.streamsets.pipeline.api.ConfigDefBean;
+import com.streamsets.pipeline.api.InterfaceAudience;
+import com.streamsets.pipeline.api.InterfaceStability;
 import com.streamsets.pipeline.api.Stage;
-import com.streamsets.pipeline.common.InterfaceAudience;
-import com.streamsets.pipeline.common.InterfaceStability;
 import com.streamsets.pipeline.config.PostProcessingOptions;
 import com.streamsets.pipeline.stage.lib.aws.AWSUtil;
-import com.streamsets.pipeline.stage.lib.aws.ProxyConfig;
 import com.streamsets.pipeline.stage.origin.lib.BasicConfig;
 
 import java.util.List;
@@ -46,9 +45,6 @@ public class S3ConfigBean {
   @ConfigDefBean(groups = "SSE")
   public S3SSEConfigBean sseConfig;
 
-  @ConfigDefBean(groups = "ADVANCED")
-  public ProxyConfig proxyConfig;
-
   @ConfigDefBean(groups = {"ERROR_HANDLING"})
   public S3ErrorConfig errorConfig;
 
@@ -68,6 +64,7 @@ public class S3ConfigBean {
       defaultValue = "false",
       description = "Select to include object metadata in record header attributes",
       displayPosition = 50,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "S3"
   )
   public boolean enableMetaData = false;
@@ -80,6 +77,7 @@ public class S3ConfigBean {
       description = "Number of parallel threads to read data",
       displayPosition = 60,
       group = "ADVANCED",
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       min = 1
   )
   public int numberOfThreads = 1;
@@ -89,7 +87,7 @@ public class S3ConfigBean {
     basicConfig.init(context, Groups.S3.name(), BASIC_CONFIG_PREFIX, issues);
 
     //S3 source specific validation
-    s3Config.init(context, S3_CONFIG_PREFIX, proxyConfig, issues, -1);
+    s3Config.init(context, S3_CONFIG_PREFIX, AWSUtil.containsWildcard(s3FileConfig.prefixPattern), issues, -1);
 
     errorConfig.errorPrefix = AWSUtil.normalizePrefix(errorConfig.errorPrefix, s3Config.delimiter);
     postProcessingConfig.postProcessPrefix = AWSUtil.normalizePrefix(postProcessingConfig.postProcessPrefix, s3Config.delimiter);

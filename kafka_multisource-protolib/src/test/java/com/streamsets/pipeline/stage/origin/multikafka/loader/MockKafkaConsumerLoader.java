@@ -20,11 +20,16 @@ import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.lib.kafka.KafkaAutoOffsetReset;
 import com.streamsets.pipeline.stage.origin.multikafka.MultiSdcKafkaConsumer;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
 
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Test provider for the KafkaConsumerLoader that is expect test to set iterators of pre-created Kafka consumers
@@ -36,7 +41,7 @@ public class MockKafkaConsumerLoader extends KafkaConsumerLoader {
   /**
    * Set this in the test to list of consumers that should be used in the origin.
    */
-  public static Iterator<KafkaConsumer> consumers;
+  public static Iterator<Consumer> consumers;
 
   @Override
   protected void validateConsumerConfiguration(
@@ -62,9 +67,9 @@ public class MockKafkaConsumerLoader extends KafkaConsumerLoader {
    */
   private class WrapperKafkaConsumer implements MultiSdcKafkaConsumer {
 
-    private KafkaConsumer delegate;
+    private Consumer delegate;
 
-    public WrapperKafkaConsumer(KafkaConsumer consumer) {
+    public WrapperKafkaConsumer(Consumer consumer) {
       this.delegate = consumer;
     }
 
@@ -89,6 +94,24 @@ public class MockKafkaConsumerLoader extends KafkaConsumerLoader {
     }
 
     @Override
-    public void commitSync() { delegate.commitSync(); }
+    public void commitSync(Map offsets) { delegate.commitSync(offsets); }
+
+    @Override
+    public List<TopicPartition> getTopicPartitions(String topic) {
+      return ((Set<PartitionInfo>) delegate.assignment())
+          .stream()
+          .map(partitionInfo -> new TopicPartition(topic, partitionInfo.partition()))
+          .collect(Collectors.toList());
+    }
+
+    @Override
+    public long getOffset(TopicPartition topicPartition) {
+      return delegate.position(topicPartition);
+    }
+
+    @Override
+    public Long getCommittedOffset(TopicPartition topicPartition) {
+      return delegate.committed(topicPartition) == null ? null : delegate.committed(topicPartition).offset();
+    }
   }
 }

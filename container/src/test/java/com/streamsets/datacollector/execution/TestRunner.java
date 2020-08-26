@@ -17,6 +17,7 @@ package com.streamsets.datacollector.execution;
 
 import com.streamsets.datacollector.callback.CallbackInfo;
 import com.streamsets.datacollector.callback.CallbackObjectType;
+import com.streamsets.datacollector.config.ConnectionConfiguration;
 import com.streamsets.datacollector.config.PipelineConfiguration;
 import com.streamsets.datacollector.execution.alerts.AlertInfo;
 import com.streamsets.datacollector.execution.runner.common.PipelineRunnerException;
@@ -45,6 +46,11 @@ public class TestRunner {
 
     @Override
     public String getRev() {
+      return null;
+    }
+
+    @Override
+    public Map<String, ConnectionConfiguration> getConnections() {
       return null;
     }
 
@@ -208,11 +214,6 @@ public class TestRunner {
     }
 
     @Override
-    public Map getUpdateInfo() {
-      return null;
-    }
-
-    @Override
     public String getToken() {
       return null;
     }
@@ -228,7 +229,7 @@ public class TestRunner {
     }
 
     @Override
-    public PipelineConfiguration getPipelineConfiguration() throws PipelineException {
+    public PipelineConfiguration getPipelineConfiguration(String user) throws PipelineException {
       return null;
     }
   }
@@ -241,6 +242,11 @@ public class TestRunner {
 
     @Override
     public String getRev() {
+      return null;
+    }
+
+    @Override
+    public Map<String, ConnectionConfiguration> getConnections() {
       return null;
     }
 
@@ -403,11 +409,6 @@ public class TestRunner {
     }
 
     @Override
-    public Map getUpdateInfo() {
-      return null;
-    }
-
-    @Override
     public String getToken() {
       return null;
     }
@@ -423,7 +424,7 @@ public class TestRunner {
     }
 
     @Override
-    public PipelineConfiguration getPipelineConfiguration() throws PipelineException {
+    public PipelineConfiguration getPipelineConfiguration(String user) throws PipelineException {
       return null;
     }
   }

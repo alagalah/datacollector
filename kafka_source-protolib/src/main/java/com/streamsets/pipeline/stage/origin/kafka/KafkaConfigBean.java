@@ -17,8 +17,10 @@ package com.streamsets.pipeline.stage.origin.kafka;
 
 import com.streamsets.pipeline.api.ConfigDef;
 import com.streamsets.pipeline.api.ConfigDefBean;
+import com.streamsets.pipeline.api.FieldSelectorModel;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.ValueChooserModel;
+import com.streamsets.pipeline.api.credential.CredentialValue;
 import com.streamsets.pipeline.config.DataFormat;
 import com.streamsets.pipeline.kafka.api.KafkaOriginGroups;
 import com.streamsets.pipeline.lib.kafka.KafkaAutoOffsetReset;
@@ -55,6 +57,7 @@ public class KafkaConfigBean {
       label = "Broker URI",
       description = "Comma-separated list of Kafka brokers. Use format <HOST>:<PORT>",
       displayPosition = 20,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "KAFKA"
   )
   public String metadataBrokerList;
@@ -66,6 +69,7 @@ public class KafkaConfigBean {
       label = "ZooKeeper URI",
       description = "Comma-separated list of ZooKeepers followed by optional chroot path. Use format: <HOST1>:<PORT1>,<HOST2>:<PORT2>,<HOST3>:<PORT3>/<ital><CHROOT_PATH></ital>",
       displayPosition = 30,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "KAFKA"
   )
   public String zookeeperConnect;
@@ -76,6 +80,7 @@ public class KafkaConfigBean {
       defaultValue = "streamsetsDataCollector",
       label = "Consumer Group",
       displayPosition = 40,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "KAFKA"
   )
   public String consumerGroup;
@@ -86,6 +91,7 @@ public class KafkaConfigBean {
       defaultValue = "topicName",
       label = "Topic",
       displayPosition = 50,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "KAFKA"
   )
   public String topic;
@@ -97,6 +103,7 @@ public class KafkaConfigBean {
       label = "Produce Single Record",
       description = "Generates a single record for multiple objects within a message",
       displayPosition = 60,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "KAFKA"
   )
   public boolean produceSingleRecordPerMessage;
@@ -108,6 +115,7 @@ public class KafkaConfigBean {
       label = "Max Batch Size (records)",
       description = "Max number of records per batch (Standalone only)",
       displayPosition = 70,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "KAFKA",
       min = 1,
       max = Integer.MAX_VALUE
@@ -121,6 +129,7 @@ public class KafkaConfigBean {
       label = "Batch Wait Time (ms)",
       description = "Max time to wait for data before sending a partial or empty batch",
       displayPosition = 80,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "KAFKA",
       min = 1,
       max = Integer.MAX_VALUE
@@ -134,6 +143,7 @@ public class KafkaConfigBean {
       label = "Rate Limit Per Partition (Kafka messages)",
       description = "Max number of messages to read per batch per partition(Cluster Mode only)",
       displayPosition = 85,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "KAFKA",
       min = 1,
       max = Integer.MAX_VALUE
@@ -149,10 +159,53 @@ public class KafkaConfigBean {
       dependsOn = "dataFormat",
       triggeredByValue = "AVRO",
       displayPosition = 90,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "KAFKA"
   )
   @ValueChooserModel(KeyDeserializerChooserValues.class)
   public Deserializer keyDeserializer = Deserializer.STRING;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.MODEL,
+      label = "Key Capture Mode",
+      description = "Controls how the Kafka message key is stored in the record.",
+      defaultValue = "NONE",
+      displayPosition = 95,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
+      group = "KAFKA"
+  )
+  @ValueChooserModel(KeyCaptureModeChooserValues.class)
+  public KeyCaptureMode keyCaptureMode = KeyCaptureMode.NONE;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.STRING,
+      label = "Key Capture Header Attribute",
+      description = "Sets the record header attribute name where the message key will be stored.",
+      defaultValue = "kafkaMessageKey",
+      displayPosition = 98,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
+      group = "KAFKA",
+      dependsOn = "keyCaptureMode",
+      triggeredByValue = {"RECORD_HEADER", "RECORD_HEADER_AND_FIELD"}
+  )
+  public String keyCaptureAttribute;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.MODEL,
+      label = "Key Capture Field",
+      description = "Sets the record field where the message key will be stored.",
+      defaultValue = "/kafkaMessageKey",
+      displayPosition = 99,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
+      group = "KAFKA",
+      dependsOn = "keyCaptureMode",
+      triggeredByValue = {"RECORD_FIELD", "RECORD_HEADER_AND_FIELD"}
+  )
+  @FieldSelectorModel(singleValued = true)
+  public String keyCaptureField;
 
   @ConfigDef(
       required = true,
@@ -163,6 +216,7 @@ public class KafkaConfigBean {
       dependsOn = "dataFormat",
       triggeredByValue = "AVRO",
       displayPosition = 100,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "KAFKA"
   )
   @ValueChooserModel(ValueDeserializerChooserValues.class)
@@ -175,6 +229,7 @@ public class KafkaConfigBean {
       description = "Strategy to select the position to start consuming messages from the Kafka partition when no offset is currently saved",
       defaultValue = "EARLIEST",
       displayPosition = 110,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "KAFKA"
   )
   @ValueChooserModel(KafkaAutoOffsetResetValues.class)
@@ -189,6 +244,7 @@ public class KafkaConfigBean {
       dependsOn = "kafkaAutoOffsetReset",
       triggeredByValue = "TIMESTAMP",
       displayPosition = 115,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "KAFKA",
       min = 0
   )
@@ -201,6 +257,7 @@ public class KafkaConfigBean {
       label = "Kafka Configuration",
       description = "Additional Kafka properties to pass to the underlying Kafka consumer",
       displayPosition = 120,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "KAFKA"
   )
   public Map<String, String> kafkaConsumerConfigs = new HashMap<>();
@@ -209,9 +266,51 @@ public class KafkaConfigBean {
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       defaultValue = "false",
+      label = "Provide Keytab",
+      description = "Use a unique Kerberos keytab and principal for this stage to securely connect to Kafka through Kerberos. Overrides the default Kerberos keytab and principal configured for the Data Collector installation.",
+      displayPosition = 125,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
+      group = "KAFKA"
+  )
+  public boolean provideKeytab;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.CREDENTIAL,
+      defaultValue = "",
+      label = "Keytab",
+      description = "Base64 encoded keytab to use for this stage. Paste the contents of the base64 encoded keytab, or use a credential function to retrieve the base64 encoded keytab from a credential store.",
+      displayPosition = 130,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
+      dependsOn = "provideKeytab",
+      triggeredByValue = "true",
+      group = "KAFKA",
+      upload = ConfigDef.Upload.BASE64
+  )
+  public CredentialValue userKeytab;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.STRING,
+      defaultValue = "user/host@REALM",
+      label = "Principal",
+      description = "Kerberos service principal to use for this stage.",
+      displayPosition = 140,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
+      dependsOn = "provideKeytab",
+      triggeredByValue = "true",
+      group = "KAFKA"
+  )
+  public String userPrincipal;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      defaultValue = "false",
       label = "Include Timestamps",
       description = "Includes the timestamps inherited from Kafka in the record header",
-      displayPosition = 130,
+      displayPosition = 150,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "KAFKA"
   )
   public boolean timestampsEnabled;

@@ -16,6 +16,7 @@
 package com.streamsets.pipeline.lib.jdbc;
 
 import com.streamsets.pipeline.api.Field;
+import com.streamsets.pipeline.lib.jdbc.connection.JdbcConnection;
 import com.streamsets.pipeline.lib.jdbc.multithread.DatabaseVendor;
 import com.streamsets.pipeline.stage.origin.jdbc.table.QuoteChar;
 import com.zaxxer.hikari.HikariConfig;
@@ -49,6 +50,8 @@ import static org.junit.Assert.assertThat;
 public class TestJdbcUtil {
 
   private static final long MINUS_2HRS_OFFSET = -7200000L;
+  private static final long WHOLE_DAY_MILLIS = 60 * 60 * 24 * 1000;
+
   private final String username = "sa";
   private final String password = "sa";
   private final String database = "test";
@@ -59,12 +62,13 @@ public class TestJdbcUtil {
   private final String emptyTableName = "EMPTY_TABLE";
   private final String dataTypesTestTable = "DATA_TYPES_TEST";
 
-  private HikariPoolConfigBean createConfigBean() {
-    HikariPoolConfigBean bean = new HikariPoolConfigBean();
-    bean.connectionString = h2ConnectionString;
-    bean.useCredentials = true;
-    bean.username = () -> username;
-    bean.password = () -> password;
+  private JdbcHikariPoolConfigBean createConfigBean() {
+    JdbcHikariPoolConfigBean bean = new JdbcHikariPoolConfigBean();
+    bean.connection = new JdbcConnection();
+    bean.connection.connectionString = h2ConnectionString;
+    bean.connection.useCredentials = true;
+    bean.connection.username = () -> username;
+    bean.connection.password = () -> password;
 
     return bean;
   }
@@ -106,11 +110,11 @@ public class TestJdbcUtil {
       );
       statement.addBatch(
           "CREATE TABLE IF NOT EXISTS " + schema + "." + dataTypesTestTable +
-              "(P_ID INT NOT NULL, TS_WITH_TZ TIMESTAMP WITH TIME ZONE NOT NULL);"
+              "(P_ID INT NOT NULL, TS_WITH_TZ TIMESTAMP WITH TIME ZONE NOT NULL, MY_DATE DATE, MY_TIME TIME);"
       );
       statement.addBatch(
           "INSERT INTO " + schema + "." + dataTypesTestTable + " VALUES (1, CAST('1970-01-01 00:00:00+02:00' " +
-              "AS TIMESTAMP WITH TIME ZONE));"
+              "AS TIMESTAMP WITH TIME ZONE), '1970-01-02', '23:59:59');"
       );
       statement.addBatch(
           "CREATE TABLE IF NOT EXISTS " + schema + "." + "\"" + emptyTableName + "\"" +
@@ -228,6 +232,46 @@ public class TestJdbcUtil {
     );
     assertThat(typedTableMin.size(), equalTo(1));
     assertThat(typedTableMin, hasEntry("P_ID", "1"));
+  }
+
+  @Test
+  public void testGetMinValuesDate() throws SQLException {
+
+    HikariPoolConfigBean config = createConfigBean();
+
+    HikariDataSource dataSource = jdbcUtil.createDataSourceForRead(config);
+    Connection connection = dataSource.getConnection();
+
+    Map<String, String> dataTableMin = jdbcUtil.getMinimumOffsetValues(
+        DatabaseVendor.UNKNOWN,
+        connection,
+        schema,
+        dataTypesTestTable,
+        QuoteChar.NONE,
+        Arrays.asList("MY_DATE")
+    );
+    assertThat(dataTableMin.size(), equalTo(1));
+    assertThat(dataTableMin, hasEntry("MY_DATE", String.valueOf(WHOLE_DAY_MILLIS)));
+  }
+
+  @Test
+  public void testGetMinValuesTime() throws SQLException {
+
+    HikariPoolConfigBean config = createConfigBean();
+
+    HikariDataSource dataSource = jdbcUtil.createDataSourceForRead(config);
+    Connection connection = dataSource.getConnection();
+
+    Map<String, String> dataTableMin = jdbcUtil.getMinimumOffsetValues(
+        DatabaseVendor.UNKNOWN,
+        connection,
+        schema,
+        dataTypesTestTable,
+        QuoteChar.NONE,
+        Arrays.asList("MY_TIME")
+    );
+    assertThat(dataTableMin.size(), equalTo(1));
+    assertThat(dataTableMin, hasEntry("MY_TIME", String.valueOf(WHOLE_DAY_MILLIS - 1000L)));
   }
 
 }

@@ -16,6 +16,7 @@
 package com.streamsets.datacollector.restapi;
 
 import com.streamsets.datacollector.activation.Activation;
+import com.streamsets.datacollector.usagestats.StatsCollector;
 import com.streamsets.datacollector.util.AuthzRole;
 import com.streamsets.datacollector.util.PipelineException;
 import io.swagger.annotations.Api;
@@ -34,7 +35,9 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Optional;
 
 @Path("/v1/activation")
 @Api(value = "activation")
@@ -42,11 +45,15 @@ import java.util.Map;
 @RequiresCredentialsDeployed
 public class ActivationResource {
 
+  static final String LICENSE_TYPE = "licenseType";
+
   private final Activation activation;
+  private final StatsCollector statsCollector;
 
   @Inject
-  public ActivationResource(Activation activation) {
+  public ActivationResource(Activation activation, StatsCollector statsCollector) {
     this.activation = activation;
+    this.statsCollector = statsCollector;
   }
 
   @GET
@@ -65,6 +72,12 @@ public class ActivationResource {
   public Response updateActivation(String activationKey) throws PipelineException, IOException {
     if (activation.isEnabled()) {
       activation.setActivationKey(activationKey);
+      Map<String, Object> additionalInfo = Optional.ofNullable(activation.getInfo())
+          .map(Activation.Info::getAdditionalInfo).orElse(Collections.emptyMap());
+      boolean canOptIn = !additionalInfo.containsKey(LICENSE_TYPE) || additionalInfo.get(LICENSE_TYPE).equals("TRIAL");
+      if (!statsCollector.isOpted() && canOptIn) {
+        statsCollector.setActive(true);
+      }
       return Response.status(Response.Status.OK).entity(activation).build();
     } else {
       return Response.status(Response.Status.NOT_IMPLEMENTED).build();

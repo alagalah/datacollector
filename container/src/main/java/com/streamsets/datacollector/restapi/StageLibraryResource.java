@@ -18,15 +18,19 @@ package com.streamsets.datacollector.restapi;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.streamsets.datacollector.classpath.ClasspathValidatorResult;
+import com.streamsets.datacollector.config.ConnectionDefinition;
 import com.streamsets.datacollector.config.ServiceDefinition;
 import com.streamsets.datacollector.config.StageDefinition;
 import com.streamsets.datacollector.config.StageLibraryDefinition;
 import com.streamsets.datacollector.definition.ConcreteELDefinitionExtractor;
+import com.streamsets.datacollector.definition.ConnectionVerifierDefinition;
 import com.streamsets.datacollector.el.RuntimeEL;
 import com.streamsets.datacollector.execution.alerts.DataRuleEvaluator;
 import com.streamsets.datacollector.main.BuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.restapi.bean.BeanHelper;
+import com.streamsets.datacollector.restapi.bean.ConnectionDefinitionJson;
+import com.streamsets.datacollector.restapi.bean.ConnectionsJson;
 import com.streamsets.datacollector.restapi.bean.DefinitionsJson;
 import com.streamsets.datacollector.restapi.bean.PipelineDefinitionJson;
 import com.streamsets.datacollector.restapi.bean.PipelineFragmentDefinitionJson;
@@ -77,6 +81,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -248,6 +254,9 @@ public class StageLibraryResource {
     // Find Stage Lib location to each stage library that we should install
     Map<String, String> libraryUrlList= new HashMap<>();
     List<RepositoryManifestJson> repoManifestList = stageLibrary.getRepositoryManifestList();
+    if (repoManifestList == null) {
+      repoManifestList = Collections.emptyList();
+    }
     for(RepositoryManifestJson repositoryManifestJson: repoManifestList) {
       for (StageLibrariesJson stageLibrariesJson : repositoryManifestJson.getStageLibraries()) {
         if (stageLibrariesJson.getStageLibraryManifest() != null) {
@@ -508,5 +517,20 @@ public class StageLibraryResource {
   public Response classpathHealth() {
     List<ClasspathValidatorResult> results = stageLibrary.validateStageLibClasspath();
     return Response.ok().entity(results).build();
+  }
+
+  @GET
+  @Path("/definitions/connections")
+  @ApiOperation(value = "Returns connection definitions", response = ConnectionsJson.class,
+      authorizations = @Authorization(value = "basic"))
+  @Produces(MediaType.APPLICATION_JSON)
+  @PermitAll
+  public Response getConnections() {
+    Collection<ConnectionDefinition> connectionDefs = stageLibrary.getConnections();
+    List<ConnectionDefinitionJson> definitionsJson =
+        connectionDefs.stream().map(connection -> new ConnectionDefinitionJson(connection,
+            stageLibrary.getConnectionVerifiers(connection.getType()))).collect(Collectors.toList());
+    ConnectionsJson connectionDefinitions = new ConnectionsJson(definitionsJson);
+    return Response.ok().type(MediaType.APPLICATION_JSON).entity(connectionDefinitions).build();
   }
 }

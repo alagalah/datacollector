@@ -53,7 +53,7 @@ import com.streamsets.pipeline.api.BatchMaker;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.base.BasePushSource;
 import com.streamsets.pipeline.api.impl.Utils;
-import com.streamsets.pipeline.lib.aws.AwsRegion;
+import com.streamsets.pipeline.stage.lib.aws.AwsRegion;
 import com.streamsets.pipeline.lib.parser.DataParserException;
 import com.streamsets.pipeline.lib.parser.DataParserFactory;
 import com.streamsets.pipeline.stage.lib.aws.AWSUtil;
@@ -79,6 +79,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 
 import static com.streamsets.pipeline.stage.lib.kinesis.KinesisUtil.KINESIS_CONFIG_BEAN;
@@ -171,11 +172,22 @@ public class KinesisSource extends BasePushSource {
     // KCL currently requires a mutable client
     dynamoDBClient = new AmazonDynamoDBClient(credentials, clientConfiguration);
     cloudWatchClient = new AmazonCloudWatchClient(credentials, clientConfiguration);
+    Region region = null;
     if (conf.region == AwsRegion.OTHER) {
-      dynamoDBClient.setEndpoint(conf.endpoint);
-      cloudWatchClient.setEndpoint(conf.endpoint);
+      Matcher matcher = KinesisUtil.REGION_PATTERN.matcher(conf.endpoint);
+      if (matcher.find()) {
+        region = Region.getRegion(Regions.valueOf(matcher.group(1).toUpperCase().replaceAll("-", "_")));
+      } else {
+        issues.add(getContext().createConfigIssue(
+            com.streamsets.pipeline.stage.destination.kinesis.Groups.KINESIS.name(),
+            KINESIS_CONFIG_BEAN + ".endpoint",
+            Errors.KINESIS_19
+        ));
+      }
     } else {
-      Region region = Region.getRegion(Regions.valueOf(conf.region.name()));
+      region = Region.getRegion(Regions.valueOf(conf.region.name()));
+    }
+    if (region != null) {
       dynamoDBClient.setRegion(region);
       cloudWatchClient.setRegion(region);
     }
@@ -217,7 +229,11 @@ public class KinesisSource extends BasePushSource {
     }
 
     if (conf.region == AwsRegion.OTHER) {
-      kclConfig.withKinesisEndpoint(conf.endpoint);
+      Matcher matcher = KinesisUtil.REGION_PATTERN.matcher(conf.endpoint);
+      if (matcher.find()) {
+        kclConfig.withRegionName(matcher.group(1));
+        kclConfig.withKinesisEndpoint(conf.endpoint.substring(matcher.start(), matcher.end()));
+      }
     } else {
       kclConfig.withRegionName(conf.region.getId());
     }
@@ -257,6 +273,10 @@ public class KinesisSource extends BasePushSource {
 
     if (conf.initialPositionInStream == InitialPositionInStream.AT_TIMESTAMP) {
       getShardIteratorRequest.setTimestamp(new Date(conf.initialTimestamp));
+    }
+
+    if (!getContext().isPreview() && conf.maxBatchSize > maxBatchSize) {
+      getContext().reportError(Errors.KINESIS_18, maxBatchSize);
     }
 
     List<com.amazonaws.services.kinesis.model.Record> results = KinesisUtil.getPreviewRecords(

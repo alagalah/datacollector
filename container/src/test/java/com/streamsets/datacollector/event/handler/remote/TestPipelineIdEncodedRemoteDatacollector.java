@@ -27,7 +27,9 @@ import org.mockito.Mockito;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 
 public class TestPipelineIdEncodedRemoteDatacollector {
@@ -36,7 +38,7 @@ public class TestPipelineIdEncodedRemoteDatacollector {
   public void testSavePipeline() throws Exception {
     RemoteDataCollector rc = Mockito.mock(RemoteDataCollector.class);
     PipelineIdEncodedRemoteDatacollector dc = Mockito.spy(new PipelineIdEncodedRemoteDatacollector(rc));
-    dc.savePipeline("user", "name:foo", "rev", "desc", null, null, null, null, null);
+    dc.savePipeline("user", "name:foo", "rev", "desc", null, null, null, null, null, new HashMap<>());
 
     Map<String, Object> so = new HashMap<>();
     so.put(RemoteDataCollector.SCH_GENERATED_PIPELINE_NAME, "name:foo");
@@ -50,7 +52,8 @@ public class TestPipelineIdEncodedRemoteDatacollector {
         Mockito.isNull(PipelineConfiguration.class),
         Mockito.isNull(RuleDefinitions.class),
         Mockito.isNull(Acl.class),
-        Mockito.eq(so)
+        Mockito.eq(so),
+        Mockito.anyMap()
     );
   }
 
@@ -59,12 +62,13 @@ public class TestPipelineIdEncodedRemoteDatacollector {
   public void testStartPipeline() throws Exception {
     RemoteDataCollector rc = Mockito.mock(RemoteDataCollector.class);
     PipelineIdEncodedRemoteDatacollector dc = Mockito.spy(new PipelineIdEncodedRemoteDatacollector(rc));
-    dc.start(null, "name:foo", "rev");
+    dc.start(null, "name:foo", "rev", new HashSet(Arrays.asList("all")));
 
     Mockito.verify(rc, Mockito.times(1)).start(
         Mockito.isNull(Runner.StartPipelineContext.class),
         Mockito.eq("name__foo"),
-        Mockito.eq("rev")
+        Mockito.eq("rev"),
+        Mockito.eq(new HashSet(Arrays.asList("all")))
     );
   }
 

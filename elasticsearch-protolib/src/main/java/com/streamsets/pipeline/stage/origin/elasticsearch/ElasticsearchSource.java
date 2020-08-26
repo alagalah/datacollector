@@ -123,6 +123,9 @@ public class ElasticsearchSource extends BasePushSource {
   @Override
   public void produce(Map<String, String> lastOffsets, int maxBatchSize) throws StageException {
     batchSize = Math.min(conf.maxBatchSize, maxBatchSize);
+    if (!getContext().isPreview() && conf.maxBatchSize > maxBatchSize) {
+      getContext().reportError(Errors.ELASTICSEARCH_35, maxBatchSize);
+    }
 
     ExecutorService executor = Executors.newFixedThreadPool(getNumberOfThreads());
     CompletionService<Void> completionService = new ExecutorCompletionService<>(executor);
@@ -352,7 +355,8 @@ public class ElasticsearchSource extends BasePushSource {
           endpoint,
           params,
           entity,
-          delegate.getAuthenticationHeader(conf.securityConfig.securityUser.get())
+          delegate.getAuthenticationHeader(conf.securityConfig.securityUser.get(),
+              conf.securityConfig.securityPassword.get())
       );
 
       Reader reader = new InputStreamReader(response.getEntity().getContent());
@@ -370,7 +374,8 @@ public class ElasticsearchSource extends BasePushSource {
             "/_search/scroll",
             conf.params,
             entity,
-            delegate.getAuthenticationHeader(conf.securityConfig.securityUser.get())
+            delegate.getAuthenticationHeader(conf.securityConfig.securityUser.get(),
+                conf.securityConfig.securityPassword.get())
         );
 
         return parseEntity(response.getEntity());
@@ -395,7 +400,7 @@ public class ElasticsearchSource extends BasePushSource {
         "/_search/scroll",
         conf.params,
         entity,
-        delegate.getAuthenticationHeader(conf.securityConfig.securityUser.get())
+        delegate.getAuthenticationHeader(conf.securityConfig.securityUser.get(), conf.securityConfig.securityPassword.get())
       );
     }
 

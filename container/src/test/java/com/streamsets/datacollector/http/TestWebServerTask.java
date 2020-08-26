@@ -18,12 +18,13 @@ package com.streamsets.datacollector.http;
 import com.codahale.metrics.MetricRegistry;
 import com.google.common.collect.ImmutableSet;
 import com.streamsets.datacollector.activation.NopActivation;
-import com.streamsets.datacollector.main.DataCollectorBuildInfo;
+import com.streamsets.datacollector.main.ProductBuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.main.RuntimeModule;
 import com.streamsets.datacollector.main.StandaloneRuntimeInfo;
 import com.streamsets.datacollector.util.Configuration;
 import com.streamsets.lib.security.http.RemoteSSOService;
+import com.streamsets.pipeline.BootstrapMain;
 import org.awaitility.Duration;
 import org.eclipse.jetty.server.ForwardedRequestCustomizer;
 import org.eclipse.jetty.server.HttpConfiguration;
@@ -35,11 +36,9 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.Response;
 import java.io.File;
 import java.net.HttpURLConnection;
-import java.net.InetAddress;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -64,8 +63,12 @@ public class TestWebServerTask {
       boolean isDPMEnabled
   ) throws Exception {
     RuntimeInfo runtimeInfo =
-        new StandaloneRuntimeInfo(RuntimeModule.SDC_PROPERTY_PREFIX, new MetricRegistry(), Collections
-            .<ClassLoader>emptyList()) {
+        new StandaloneRuntimeInfo(
+            RuntimeInfo.SDC_PRODUCT,
+            RuntimeModule.SDC_PROPERTY_PREFIX,
+            new MetricRegistry(),
+            Collections.emptyList()
+        ) {
           @Override
           public String getConfigDir() {
             return confDir;
@@ -82,7 +85,8 @@ public class TestWebServerTask {
       final Set<WebAppProvider> webAppProviders
   ) throws Exception {
     Set<ContextConfigurator> configurators = new HashSet<>();
-    return new WebServerTask(new DataCollectorBuildInfo(),
+    return new WebServerTask(
+        ProductBuildInfo.getDefault(),
         runtimeInfo,
         conf,
         new NopActivation(),
@@ -188,8 +192,12 @@ public class TestWebServerTask {
   @Test
   public void testSSOServiceInRuntime() throws Exception {
     RuntimeInfo runtimeInfo =
-        new StandaloneRuntimeInfo(RuntimeModule.SDC_PROPERTY_PREFIX, new MetricRegistry(), Collections
-            .<ClassLoader>emptyList()) {
+        new StandaloneRuntimeInfo(
+            RuntimeInfo.SDC_PRODUCT,
+            RuntimeModule.SDC_PROPERTY_PREFIX,
+            new MetricRegistry(),
+            Collections.emptyList()
+        ) {
           @Override
           public String getConfigDir() {
             return new File("target").getAbsolutePath();
@@ -229,7 +237,12 @@ public class TestWebServerTask {
   @Test
   public void testSSOServiceDisabled() throws Exception {
     RuntimeInfo runtimeInfo =
-        new StandaloneRuntimeInfo(RuntimeModule.SDC_PROPERTY_PREFIX, new MetricRegistry(), Collections.emptyList()) {
+        new StandaloneRuntimeInfo(
+            RuntimeInfo.SDC_PRODUCT,
+            RuntimeModule.SDC_PROPERTY_PREFIX,
+            new MetricRegistry(),
+            Collections.emptyList()
+        ) {
           @Override
           public String getConfigDir() {
             return new File("target").getAbsolutePath();
@@ -318,7 +331,12 @@ public class TestWebServerTask {
   @Test
   public void testTraceHttpDisabled() throws Exception {
     RuntimeInfo runtimeInfo =
-        new StandaloneRuntimeInfo(RuntimeModule.SDC_PROPERTY_PREFIX, new MetricRegistry(), Collections.emptyList()) {
+        new StandaloneRuntimeInfo(
+            RuntimeInfo.SDC_PRODUCT,
+            RuntimeModule.SDC_PROPERTY_PREFIX,
+            new MetricRegistry(),
+            Collections.emptyList()
+        ) {
           @Override
           public String getConfigDir() {
             return new File("target").getAbsolutePath();

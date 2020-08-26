@@ -22,6 +22,7 @@ import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.ValueChooserModel;
 import com.streamsets.pipeline.api.credential.CredentialValue;
+import com.streamsets.pipeline.lib.AzureUtils;
 import com.streamsets.pipeline.lib.hdfs.common.HdfsBaseConfigBean;
 import com.streamsets.pipeline.stage.destination.datalake.Errors;
 import com.streamsets.pipeline.stage.destination.datalake.gen2.DataLakeGen2TargetGroups;
@@ -53,8 +54,9 @@ public class DataLakeGen2BaseConfig {
   private static final String ADLS_CONFIG_CLIENT_ID_KEY = "fs.azure.account.oauth2.client.id";
   private static final String ADLS_CONFIG_CLIENT_SECRET_KEY = "fs.azure.account.oauth2.client.secret";
 
+  private static final String ADLS_USER_AGENT_STRING_KEY = "fs.azure.user.agent.prefix";
+
   private static final String ABFS_CONFIG_ACCOUNT_PREFIX = "fs.azure.account.key.";
-  private static final String ABFS_PROTOCOL = "abfs://";
 
   @ConfigDef(
       required = true,
@@ -143,12 +145,24 @@ public class DataLakeGen2BaseConfig {
   public CredentialValue accountKey;
 
   @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      label = "Secure Connection",
+      defaultValue = "false",
+      description = "Enable a secure connection using abfss",
+      displayPosition = 75,
+      group = "DATALAKE"
+  )
+  public boolean secureConnection;
+
+  @ConfigDef(
       required = false,
       type = ConfigDef.Type.MODEL,
       label = "Advanced Configuration",
       description = "Additional HDFS properties to pass to the underlying file system. " +
           "These properties take precedence over those defined in HDFS configuration files.",
       displayPosition = 80,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "DATALAKE"
   )
   @ListBeanModel
@@ -158,27 +172,38 @@ public class DataLakeGen2BaseConfig {
   public void init(HdfsBaseConfigBean hdfsBaseConfigBean, final Stage.Context context, List<Stage.ConfigIssue> issues) {
     initHiddenDefaults(hdfsBaseConfigBean);
 
-    String storageContainer = resolveCredentialValue(context, this.storageContainer, ADLS_CONFIG_STORAGE_CONTAINER, issues);
-    String accountFQDN = resolveCredentialValue(context, this.accountFQDN, ADLS_CONFIG_ACCOUNT_FQDN, issues);
-    hdfsBaseConfigBean.hdfsUri = buildAbfsUri(storageContainer, accountFQDN);
+    String storageContainerString = resolveCredentialValue(context,
+        this.storageContainer,
+        ADLS_CONFIG_STORAGE_CONTAINER,
+        issues
+    );
+    String accountFQDNString = resolveCredentialValue(context, this.accountFQDN, ADLS_CONFIG_ACCOUNT_FQDN, issues);
+    hdfsBaseConfigBean.hdfsUri = buildAbfsUri(storageContainerString, accountFQDNString);
 
     switch (this.authMethod) {
       case OAUTH:
-        hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(ADLS_CONFIG_AUTH_TYPE_KEY, ADLS_CONFIG_AUTH_TYPE_DEFAULT_VALUE));
-        hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(ADLS_CONFIG_OAUTH_PROVIDER_TYPE_KEY, ADLS_CONFIG_OAUTH_CLIENT_CREDS_TOKEN_PROVIDER_VALUE));
+        hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(ADLS_CONFIG_AUTH_TYPE_KEY,
+            ADLS_CONFIG_AUTH_TYPE_DEFAULT_VALUE
+        ));
+        hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(ADLS_CONFIG_OAUTH_PROVIDER_TYPE_KEY,
+            ADLS_CONFIG_OAUTH_CLIENT_CREDS_TOKEN_PROVIDER_VALUE
+        ));
         hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(ADLS_CONFIG_AUTH_ENDPOINT_KEY, this.authTokenEndpoint));
         hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(ADLS_CONFIG_CLIENT_ID_KEY, this.clientId));
         hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(ADLS_CONFIG_CLIENT_SECRET_KEY, this.clientKey));
         break;
       case SHARED_KEY:
-        String propertyName = ABFS_CONFIG_ACCOUNT_PREFIX + accountFQDN;
+        String propertyName = ABFS_CONFIG_ACCOUNT_PREFIX + accountFQDNString;
         hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(propertyName, this.accountKey));
         break;
     }
 
-    for (HadoopConfigBean configBean : this.advancedConfiguration) {
-      hdfsBaseConfigBean.hdfsConfigs.add(configBean);
-    }
+    hdfsBaseConfigBean.hdfsConfigs.addAll(this.advancedConfiguration);
+
+    hdfsBaseConfigBean.hdfsConfigs.add(new HadoopConfigBean(
+        ADLS_USER_AGENT_STRING_KEY,
+        AzureUtils.buildUserAgentString(context)
+    ));
   }
 
   private String resolveCredentialValue(final Stage.Context context, CredentialValue credentialValue, String configName, List<Stage.ConfigIssue> issues) {
@@ -204,6 +229,9 @@ public class DataLakeGen2BaseConfig {
   }
 
   private String buildAbfsUri(String container, String accountFQDN) {
-    return ABFS_PROTOCOL + container + "@" + accountFQDN;
+    String abfsProtocol = secureConnection ?
+        DataLakeConnectionProtocol.ABFS_PROTOCOL_SECURE.getProtocol() :
+        DataLakeConnectionProtocol.ABFS_PROTOCOL.getProtocol();
+    return abfsProtocol + container + "@" + accountFQDN;
   }
 }

@@ -19,7 +19,9 @@ import com.google.common.net.HostAndPort;
 import com.streamsets.pipeline.api.Field;
 import com.streamsets.pipeline.api.OffsetCommitter;
 import com.streamsets.pipeline.api.Record;
+import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
+import com.streamsets.pipeline.api.ToErrorContext;
 import com.streamsets.pipeline.api.base.BaseSource;
 import com.streamsets.pipeline.api.base.OnRecordErrorException;
 import com.streamsets.pipeline.api.impl.Utils;
@@ -32,12 +34,17 @@ import com.streamsets.pipeline.kafka.api.SdcKafkaValidationUtil;
 import com.streamsets.pipeline.kafka.api.SdcKafkaValidationUtilFactory;
 import com.streamsets.pipeline.lib.kafka.KafkaConstants;
 import com.streamsets.pipeline.lib.kafka.KafkaErrors;
+import com.streamsets.datacollector.security.kafka.KafkaKerberosUtil;
+import com.streamsets.pipeline.lib.kafka.MessageKeyUtil;
 import com.streamsets.pipeline.lib.parser.DataParser;
 import com.streamsets.pipeline.lib.parser.DataParserException;
 import com.streamsets.pipeline.lib.parser.DataParserFactory;
+import com.streamsets.pipeline.lib.parser.RecoverableDataParserException;
 import com.streamsets.pipeline.stage.common.DefaultErrorRecordHandler;
 import com.streamsets.pipeline.stage.common.ErrorRecordHandler;
 import com.streamsets.pipeline.stage.common.HeaderAttributeConstants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -49,9 +56,12 @@ import static com.streamsets.pipeline.Utils.KAFKA_CONFIG_BEAN_PREFIX;
 import static com.streamsets.pipeline.Utils.KAFKA_DATA_FORMAT_CONFIG_BEAN_PREFIX;
 
 public abstract class BaseKafkaSource extends BaseSource implements OffsetCommitter {
+  private static final Logger LOG = LoggerFactory.getLogger(BaseKafkaSource.class);
 
   protected final KafkaConfigBean conf;
   protected SdcKafkaConsumer kafkaConsumer;
+  private KafkaKerberosUtil kafkaKerberosUtil;
+  private String keytabFileName;
 
   private ErrorRecordHandler errorRecordHandler;
   private DataParserFactory parserFactory;
@@ -71,6 +81,8 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
   @Override
   protected List<ConfigIssue> init() {
     List<ConfigIssue> issues = new ArrayList<>();
+    kafkaKerberosUtil = new KafkaKerberosUtil(getContext().getConfiguration());
+    Utils.checkNotNull(kafkaKerberosUtil, "kafkaKerberosUtil");
     errorRecordHandler = new DefaultErrorRecordHandler(getContext());
 
     if (conf.topic == null || conf.topic.isEmpty()) {
@@ -122,6 +134,16 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
         KAFKA_CONFIG_BEAN_PREFIX + BROKER_LIST,
         getContext()
     );
+
+    if (conf.provideKeytab && kafkaValidationUtil.isProvideKeytabAllowed(issues, getContext())) {
+      keytabFileName = kafkaKerberosUtil.saveUserKeytab(
+          conf.userKeytab.get(),
+          conf.userPrincipal,
+          conf.kafkaConsumerConfigs,
+          issues,
+          getContext()
+      );
+    }
 
     try {
       int partitionCount = kafkaValidationUtil.getPartitionCount(
@@ -180,6 +202,13 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
       kafkaConsumerConfigs.put(KafkaConstants.CONFLUENT_SCHEMA_REGISTRY_URL_CONFIG,
           conf.dataFormatConfig.schemaRegistryUrls
       );
+
+      String userInfo = conf.dataFormatConfig.basicAuth.get();
+      if (!userInfo.isEmpty()) {
+        kafkaConsumerConfigs.put(KafkaConstants.BASIC_AUTH_CREDENTIAL_SOURCE, KafkaConstants.USER_INFO);
+        kafkaConsumerConfigs.put(KafkaConstants.BASIC_AUTH_USER_INFO, userInfo);
+      }
+
       ConsumerFactorySettings settings = new ConsumerFactorySettings(
           conf.zookeeperConnect,
           conf.metadataBrokerList,
@@ -219,13 +248,23 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
   }
 
   protected List<Record> processKafkaMessageDefault(
-      String partition, long offset, String messageId, byte[] payload
+      Object messageKey,
+      String partition,
+      long offset,
+      String messageId,
+      byte[] payload
   ) throws StageException {
-    return processKafkaMessageDefault(partition, offset, messageId, payload, 0, "");
+    return processKafkaMessageDefault(messageKey, partition, offset, messageId, payload, 0, "");
   }
 
   protected List<Record> processKafkaMessageDefault(
-      String partition, long offset, String messageId, byte[] payload, long timestamp, String timestampType
+      Object messageKey,
+      String partition,
+      long offset,
+      String messageId,
+      byte[] payload,
+      long timestamp,
+      String timestampType
   ) throws StageException {
     List<Record> records = new ArrayList<>();
     if (payload == null) {
@@ -240,21 +279,49 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
       );
       return records;
     }
-    try (DataParser parser = Utils.checkNotNull(parserFactory, "Initialization failed").getParser(messageId, payload)) {
-      Record record = parser.parse();
-      while (record != null) {
-        if (timestamp != 0) {
-          record.getHeader().setAttribute(HeaderAttributeConstants.KAFKA_TIMESTAMP, String.valueOf(timestamp));
-          record.getHeader().setAttribute(HeaderAttributeConstants.KAFKA_TIMESTAMP_TYPE, timestampType);
-        }
-        record.getHeader().setAttribute(HeaderAttributeConstants.TOPIC, conf.topic);
-        record.getHeader().setAttribute(HeaderAttributeConstants.PARTITION, partition);
-        record.getHeader().setAttribute(HeaderAttributeConstants.OFFSET, String.valueOf(offset));
 
-        records.add(record);
-        record = parser.parse();
-      }
-    } catch (IOException|DataParserException ex) {
+    try (DataParser parser = Utils.checkNotNull(parserFactory, "Initialization failed").getParser(messageId, payload)) {
+
+      Record record = null;
+      boolean recoverableExceptionHit;
+      do {
+        try {
+          recoverableExceptionHit = false;
+          record = parser.parse();
+        } catch (RecoverableDataParserException e) {
+          recoverableExceptionHit = true;
+          handleException(getContext(), getContext(), messageId, e, e.getUnparsedRecord());
+
+          //Go to next record
+          continue;
+        }
+
+        if (record != null) {
+          if (timestamp != 0) {
+            record.getHeader().setAttribute(HeaderAttributeConstants.KAFKA_TIMESTAMP, String.valueOf(timestamp));
+            record.getHeader().setAttribute(HeaderAttributeConstants.KAFKA_TIMESTAMP_TYPE, timestampType);
+          }
+          record.getHeader().setAttribute(HeaderAttributeConstants.TOPIC, conf.topic);
+          record.getHeader().setAttribute(HeaderAttributeConstants.PARTITION, partition);
+          record.getHeader().setAttribute(HeaderAttributeConstants.OFFSET, String.valueOf(offset));
+
+          try {
+            MessageKeyUtil.handleMessageKey(messageKey, conf.keyCaptureMode, record, conf.keyCaptureField, conf.keyCaptureAttribute);
+          } catch (Exception e) {
+            throw new OnRecordErrorException(
+                record,
+                KafkaErrors.KAFKA_201,
+                partition,
+                offset,
+                e.getMessage(),
+                e
+            );
+          }
+
+          records.add(record);
+        }
+      } while (record != null || recoverableExceptionHit);
+    } catch (IOException | DataParserException ex) {
       Record record = getContext().createRecord(messageId);
       record.set(Field.create(payload));
       errorRecordHandler.onError(
@@ -280,4 +347,32 @@ public abstract class BaseKafkaSource extends BaseSource implements OffsetCommit
     return records;
   }
 
+  @Override
+  public void destroy() {
+    kafkaKerberosUtil.deleteUserKeytabIfExists(keytabFileName, getContext());
+  }
+
+  private static void handleException(
+      Stage.Context stageContext,
+      ToErrorContext errorContext,
+      String messageId,
+      Exception ex,
+      Record record
+  ) throws StageException {
+    switch (stageContext.getOnErrorRecord()) {
+      case DISCARD:
+        break;
+      case TO_ERROR:
+        errorContext.toError(record, KafkaErrors.KAFKA_37, messageId, ex.toString(), ex);
+        break;
+      case STOP_PIPELINE:
+        if (ex instanceof StageException) {
+          throw (StageException) ex;
+        } else {
+          throw new StageException(KafkaErrors.KAFKA_37, messageId, ex.toString(), ex);
+        }
+      default:
+        throw new IllegalStateException(Utils.format("Unknown on error value '{}'", stageContext, ex));
+    }
+  }
 }

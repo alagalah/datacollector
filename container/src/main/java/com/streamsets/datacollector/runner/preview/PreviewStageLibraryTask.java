@@ -17,6 +17,7 @@ package com.streamsets.datacollector.runner.preview;
 
 import com.streamsets.datacollector.classpath.ClasspathValidatorResult;
 import com.streamsets.datacollector.config.ConfigDefinition;
+import com.streamsets.datacollector.config.ConnectionDefinition;
 import com.streamsets.datacollector.config.CredentialStoreDefinition;
 import com.streamsets.datacollector.config.InterceptorDefinition;
 import com.streamsets.datacollector.config.LineagePublisherDefinition;
@@ -27,6 +28,7 @@ import com.streamsets.datacollector.config.ServiceDefinition;
 import com.streamsets.datacollector.config.StageDefinition;
 import com.streamsets.datacollector.config.StageLibraryDefinition;
 import com.streamsets.datacollector.config.StageLibraryDelegateDefinitition;
+import com.streamsets.datacollector.definition.ConnectionVerifierDefinition;
 import com.streamsets.datacollector.restapi.bean.EventDefinitionJson;
 import com.streamsets.datacollector.restapi.bean.RepositoryManifestJson;
 import com.streamsets.datacollector.stagelibrary.StageLibraryTask;
@@ -36,10 +38,12 @@ import com.streamsets.pipeline.api.StageType;
 import com.streamsets.pipeline.api.StageUpgrader;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 public class PreviewStageLibraryTask extends TaskWrapper implements StageLibraryTask {
   public static final String LIBRARY = ":system:";
@@ -86,6 +90,8 @@ public class PreviewStageLibraryTask extends TaskWrapper implements StageLibrary
       -1,
       null,
       false,
+      Collections.emptyList(),
+      null,
       Collections.emptyList()
   );
 
@@ -214,4 +220,23 @@ public class PreviewStageLibraryTask extends TaskWrapper implements StageLibrary
     return library.getEventDefinitions();
   }
 
+  @Override
+  public StageLibraryDefinition getStageLibraryDefinition(String libraryName) {
+    return library.getStageLibraryDefinition(libraryName);
+  }
+
+  @Override
+  public Collection<ConnectionDefinition> getConnections() {
+    return library.getConnections();
+  }
+
+  @Override
+  public ConnectionDefinition getConnection(String type) {
+    return this.library.getConnection(type);
+  }
+
+  @Override
+  public Set<ConnectionVerifierDefinition> getConnectionVerifiers(String type) {
+    return library.getConnectionVerifiers(type);
+  }
 }

@@ -17,11 +17,14 @@ package com.streamsets.pipeline.lib.jdbc;
 
 import com.google.common.collect.ImmutableList;
 import com.streamsets.pipeline.api.Field;
+import com.streamsets.pipeline.api.OnRecordError;
 import com.streamsets.pipeline.api.Record;
+import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.base.OnRecordErrorException;
 import com.streamsets.pipeline.lib.operation.OperationType;
 import com.streamsets.pipeline.lib.operation.UnsupportedOperationAction;
+import com.streamsets.pipeline.sdk.ContextInfoCreator;
 import com.streamsets.pipeline.sdk.RecordCreator;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -56,7 +59,7 @@ public class TestGenericRecordWriter {
   private static final String connectionString = "jdbc:h2:mem:test";
   private DataSource dataSource;
   private Connection connection;
-
+  private final Stage.Context context = ContextInfoCreator.createTargetContext("a", false, OnRecordError.STOP_PIPELINE);
 
   @Before
   public void setUp() throws SQLException {
@@ -122,7 +125,9 @@ public class TestGenericRecordWriter {
         null,
         new JdbcRecordReader(),
         caseSensitive,
-        Collections.emptyList()
+        Collections.emptyList(),
+        true,
+        context
     );
     List<Record> batch = ImmutableList.of(record);
     writer.writeBatch(batch.iterator());
@@ -171,7 +176,9 @@ public class TestGenericRecordWriter {
         null,
         new JdbcRecordReader(),
         caseSensitive,
-        Collections.emptyList()
+        Collections.emptyList(),
+        true,
+        context
     );
     List<Record> batch = ImmutableList.of(insertRecord, updateRecord);
     writer.writeBatch(batch.iterator());
@@ -221,7 +228,9 @@ public class TestGenericRecordWriter {
         null,
         new JdbcRecordReader(),
         caseSensitive,
-        Collections.emptyList()
+        Collections.emptyList(),
+        true,
+        context
     );
     List<Record> batch = ImmutableList.of(insertRecord, deleteRecord);
     writer.writeBatch(batch.iterator());
@@ -272,7 +281,9 @@ public class TestGenericRecordWriter {
         null,
         new JdbcRecordReader(),
         caseSensitive,
-        Collections.emptyList()
+        Collections.emptyList(),
+        true,
+        context
     );
     List<Record> batch = ImmutableList.of(insertRecord, updateRecord);
     writer.writeBatch(batch.iterator());
@@ -325,7 +336,9 @@ public class TestGenericRecordWriter {
         null,
         new JdbcRecordReader(),
         caseSensitive,
-        Collections.emptyList()
+        Collections.emptyList(),
+        true,
+        context
     );
     List<Record> batch = ImmutableList.of(insertRecord, deleteRecord);
     writer.writeBatch(batch.iterator());
@@ -363,7 +376,9 @@ public class TestGenericRecordWriter {
         null,
         new JdbcRecordReader(),
         caseSensitive,
-        Collections.emptyList()
+        Collections.emptyList(),
+        true,
+        context
     );
     Record record = RecordCreator.create();
     Map<String, Field> fields = new HashMap<>();
@@ -407,11 +422,13 @@ public class TestGenericRecordWriter {
         null,
         new JdbcRecordReader(),
         caseSensitive,
-        Collections.emptyList()
+        Collections.emptyList(),
+        true,
+        context
     );
     List<Record> batch = ImmutableList.of(record);
     final List<OnRecordErrorException> errors = writer.writeBatch(batch.iterator());
-    assertTrue(errors.isEmpty());
+    assertEquals(1, errors.size());
   }
 
   private void executeSetParameters(

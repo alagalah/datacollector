@@ -59,6 +59,7 @@ import java.util.concurrent.TimeoutException;
 public class HttpClientTarget extends BaseTarget {
 
   private static final Logger LOG = LoggerFactory.getLogger(HttpClientTarget.class);
+  private static final String REQUEST_STATUS_CONFIG_NAME = "HTTP-Status";
   private final HttpClientTargetConfig conf;
   private final HttpClientCommon httpClientCommon;
   private DataGeneratorFactory generatorFactory;
@@ -133,7 +134,7 @@ public class HttpClientTarget extends BaseTarget {
         if (response.hasEntity()) {
           responseBody = response.readEntity(String.class);
         }
-        if (conf.client.useOAuth2 && response.getStatus() == 403) {
+        if (conf.client.useOAuth2 && (response.getStatus() == 403 || response.getStatus() == 401)) {
           HttpStageUtil.getNewOAuth2Token(conf.client.oauth2, httpClientCommon.getClient());
         } else if (response.getStatus() < 200 || response.getStatus() >= 300) {
           errorRecordHandler.onError(
@@ -153,7 +154,7 @@ public class HttpClientTarget extends BaseTarget {
                 getContext().toSourceResponse(records.next());
               }
             } else {
-              getContext().toSourceResponse(createResponseRecord(responseBody));
+              getContext().toSourceResponse(createResponseRecord(responseBody,response.getStatus()));
             }
           }
         }
@@ -260,7 +261,7 @@ public class HttpClientTarget extends BaseTarget {
           if (ResponseType.SUCCESS_RECORDS.equals(conf.responseConf.responseType)) {
             getContext().toSourceResponse(record);
           } else {
-            getContext().toSourceResponse(createResponseRecord(responseBody));
+            getContext().toSourceResponse(createResponseRecord(responseBody,response.getStatus()));
           }
         }
       }
@@ -288,10 +289,11 @@ public class HttpClientTarget extends BaseTarget {
     }
   }
 
-  private Record createResponseRecord(String responseBody) {
+  private Record createResponseRecord(String responseBody, int status) {
     Record responseRecord = getContext().createRecord("responseRecord");
     responseRecord.set(Field.create(responseBody));
     responseRecord.getHeader().setAttribute(RestServiceReceiver.RAW_DATA_RECORD_HEADER_ATTR_NAME, "true");
+    responseRecord.getHeader().setAttribute(REQUEST_STATUS_CONFIG_NAME,String.format("%d",status));
     return responseRecord;
   }
 

@@ -20,22 +20,24 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.util.concurrent.RateLimiter;
 import com.streamsets.pipeline.api.PushSource;
 import com.streamsets.pipeline.stage.origin.jdbc.CommonSourceConfigBean;
+import com.streamsets.pipeline.stage.origin.jdbc.cdc.sqlserver.SQLServerCDCSource;
 import com.streamsets.pipeline.stage.origin.jdbc.table.TableJdbcConfigBean;
 
 import java.util.Map;
 
 public class JdbcRunnableBuilder {
-  private PushSource.Context context;
-  private int threadNumber;
-  private int batchSize;
-  private TableJdbcConfigBean tableJdbcConfigBean;
-  private CommonSourceConfigBean commonSourceConfigBean;
-  private Map<String, String> offsets;
-  private ConnectionManager connectionManager;
-  private MultithreadedTableProvider tableProvider;
-  private CacheLoader<TableRuntimeContext, TableReadContext> tableReadContextCache;
-  private RateLimiter queryRateLimiter;
-  private boolean isReconnect;
+  protected PushSource.Context context;
+  protected int threadNumber;
+  protected int batchSize;
+  protected TableJdbcConfigBean tableJdbcConfigBean;
+  protected CommonSourceConfigBean commonSourceConfigBean;
+  protected Map<String, String> offsets;
+  protected ConnectionManager connectionManager;
+  protected MultithreadedTableProvider tableProvider;
+  protected CacheLoader<TableRuntimeContext, TableReadContext> tableReadContextCache;
+  protected RateLimiter queryRateLimiter;
+  protected boolean isReconnect;
+  protected Map<String, SQLServerCDCSource.SourceTableInfo> infoMap;
 
   public JdbcRunnableBuilder() {
   }
@@ -95,6 +97,11 @@ public class JdbcRunnableBuilder {
     return this;
   }
 
+  public JdbcRunnableBuilder sourceTableInfo(Map<String, SQLServerCDCSource.SourceTableInfo> infoMap) {
+    this.infoMap = infoMap;
+    return this;
+  }
+
   public JdbcBaseRunnable build() {
     final String SQLServerCT = "SQLServerChangeTrackingClient";
     final String SQLServerCDC = "SQLServerCDCClient";
@@ -124,7 +131,8 @@ public class JdbcRunnableBuilder {
           commonSourceConfigBean,
           tableReadContextCache,
           queryRateLimiter,
-          isReconnect
+          isReconnect,
+          infoMap
       );
     } else {
       return new TableJdbcRunnable(

@@ -30,11 +30,11 @@ import com.amazonaws.services.kinesis.model.Shard;
 import com.amazonaws.services.kinesis.model.StreamDescription;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
-import com.streamsets.pipeline.lib.aws.AwsRegion;
 import com.streamsets.pipeline.lib.parser.DataParser;
 import com.streamsets.pipeline.lib.parser.DataParserException;
 import com.streamsets.pipeline.lib.parser.DataParserFactory;
 import com.streamsets.pipeline.stage.lib.aws.AWSUtil;
+import com.streamsets.pipeline.stage.lib.aws.AwsRegion;
 import com.streamsets.pipeline.stage.origin.kinesis.Groups;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
@@ -52,6 +53,10 @@ public class KinesisUtil {
   public static final int ONE_MB = 1024 * KB; // MiB
   public static final String KINESIS_CONFIG_BEAN = "kinesisConfig";
   public static final String LEASE_TABLE_BEAN = "leaseTable";
+
+  public static final Pattern REGION_PATTERN = Pattern.compile(
+      "(?:https?://)?[\\w-]*\\.?kinesis\\.([\\w-]+)(?:\\.vpce)?\\.amazonaws\\.com"
+  );
 
   private KinesisUtil() {}
 

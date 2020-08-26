@@ -35,6 +35,7 @@ import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.ZoneId;
 import java.util.LinkedList;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -212,7 +213,7 @@ public class FieldTypeConverterProcessor extends SingleLaneRecordProcessor {
       }
     }
 
-    if (field.getType().isOneOf(Field.Type.DATETIME, Field.Type.DATE, Field.Type.TIME) && converterConfig.targetType.isOneOf(Field.Type.LONG, Field.Type.STRING)) {
+    if (field.getType().isOneOf(Field.Type.DATETIME, Field.Type.DATE, Field.Type.TIME) && converterConfig.targetType.isOneOf(Field.Type.LONG, Field.Type.STRING, Field.Type.ZONED_DATETIME)) {
       if (field.getValue() == null) {
         return Field.create(converterConfig.targetType, null);
       } else if(converterConfig.targetType == Field.Type.LONG) {
@@ -221,6 +222,11 @@ public class FieldTypeConverterProcessor extends SingleLaneRecordProcessor {
         String dateMask = converterConfig.getDateMask();
         java.text.DateFormat dateFormat = new SimpleDateFormat(dateMask, Locale.ENGLISH);
         return Field.create(converterConfig.targetType, dateFormat.format(field.getValueAsDatetime()));
+      } else if(converterConfig.targetType == Field.Type.ZONED_DATETIME) {
+        return Field.create(Field.Type.ZONED_DATETIME, ZonedDateTime.ofInstant(
+            field.getValueAsDatetime().toInstant(),
+            ZoneId.of(converterConfig.zonedDateTimeTargetTimeZone)
+        ));
       }
     }
 
@@ -316,7 +322,7 @@ public class FieldTypeConverterProcessor extends SingleLaneRecordProcessor {
     String stringValue = field.getValueAsString();
     switch(targetType) {
       case BOOLEAN:
-        return Field.create(Boolean.valueOf(stringValue));
+        return Field.create(Field.Type.BOOLEAN, Boolean.valueOf(stringValue.trim()));
       case BYTE:
         return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue).byteValue());
       case BYTE_ARRAY:
@@ -325,35 +331,35 @@ public class FieldTypeConverterProcessor extends SingleLaneRecordProcessor {
         return Field.create(stringValue.charAt(0));
       case DATE:
         java.text.DateFormat dateFormat = new SimpleDateFormat(dateMask, Locale.ENGLISH);
-        return Field.createDate(dateFormat.parse(stringValue));
+        return Field.createDate(dateFormat.parse(stringValue.trim()));
       case DATETIME:
         java.text.DateFormat dateTimeFormat = new SimpleDateFormat(dateMask, Locale.ENGLISH);
-        return Field.createDatetime(dateTimeFormat.parse(stringValue));
+        return Field.createDatetime(dateTimeFormat.parse(stringValue.trim()));
       case TIME:
         java.text.DateFormat timeFormat = new SimpleDateFormat(dateMask, Locale.ENGLISH);
-        return Field.createTime(timeFormat.parse(stringValue));
+        return Field.createTime(timeFormat.parse(stringValue.trim()));
       case ZONED_DATETIME:
-        return Field.createZonedDateTime(ZonedDateTime.parse(stringValue, dateTimeFormatter));
+        return Field.createZonedDateTime(ZonedDateTime.parse(stringValue.trim(), dateTimeFormatter));
       case DECIMAL:
         NumberFormat decimalFormat = NumberFormat.getInstance(dataLocale);
         DecimalFormat df = (DecimalFormat) decimalFormat;
         df.setParseBigDecimal(true);
-        Number decimal = df.parse(stringValue);
+        Number decimal = df.parse(stringValue.trim());
         BigDecimal bigDecimal = adjustScaleIfNeededForDecimalConversion(new BigDecimal(decimal.toString()), scale, decimalScaleRoundingStrategy);
         Field decimalField = Field.create(Field.Type.DECIMAL, bigDecimal);
         decimalField.setAttribute(HeaderAttributeConstants.ATTR_PRECISION, String.valueOf(bigDecimal.precision()));
         decimalField.setAttribute(HeaderAttributeConstants.ATTR_SCALE, String.valueOf(bigDecimal.scale()));
         return decimalField;
       case DOUBLE:
-        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue).doubleValue());
+        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue.trim()).doubleValue());
       case FLOAT:
-        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue).floatValue());
+        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue.trim()).floatValue());
       case INTEGER:
-        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue).intValue());
+        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue.trim()).intValue());
       case LONG:
-        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue).longValue());
+        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue.trim()).longValue());
       case SHORT:
-        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue).shortValue());
+        return Field.create(NumberFormat.getInstance(dataLocale).parse(stringValue.trim()).shortValue());
       case FILE_REF:
         throw new IllegalArgumentException(Utils.format("Cannot convert String value to type {}", targetType));
       default:

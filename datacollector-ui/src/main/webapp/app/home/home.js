@@ -34,7 +34,7 @@ angular
   }])
   .controller('HomeController', function (
     $scope, $rootScope, $routeParams, $q, $modal, $location, pipelineService, api, configuration, pipelineConstant,
-    Analytics, $route, $translate
+    Analytics, $route, $translate, tracking, trackingEvent
   ) {
 
     // Handle importing pipeline from github URL
@@ -126,6 +126,10 @@ angular
           function (res) {
             var pipelineInfoList = res.data[0];
             var statusList = res.data[1];
+
+            if ($scope.selectedPipelineLabel === 'system:samplePipelines') {
+              pipelineService.processSamplePipelines(pipelineInfoList);
+            }
 
             $scope.filteredPipelines.push.apply($scope.filteredPipelines, pipelineInfoList);
 
@@ -465,7 +469,19 @@ angular
        * @param pipeline
        */
       openPipeline: function(pipeline) {
-        $location.path('/collector/pipeline/' + pipeline.pipelineId);
+        if ($scope.selectedPipelineLabel === 'system:samplePipelines') {
+          $location.path('/collector/pipeline/' + pipeline.pipelineId).search({'samplePipeline': 'true'});
+          tracking.mixpanel.track(trackingEvent.SAMPLE_PIPELINE_VIEW, {
+            'Sample Pipeline ID': pipeline.pipelineId,
+            'Sample Pipeline Title': pipeline.title
+          });
+        } else {
+          $location.path('/collector/pipeline/' + pipeline.pipelineId);
+          tracking.mixpanel.track(trackingEvent.PIPELINE_SETUP_VIEW, {
+            'Pipeline ID': pipeline.pipelineId,
+            'Pipeline Status': $rootScope.common.pipelineStatusMap[pipeline.pipelineId].status
+          });
+        }
       },
 
       /**
@@ -562,6 +578,9 @@ angular
             },
             forceStop: function() {
               return forceStop;
+            },
+            pipelineConfig: function() {
+              return null;
             }
           }
         });
@@ -615,6 +634,9 @@ angular
             },
             forceStop: function() {
               return forceStop;
+            },
+            pipelineConfig: function() {
+              return null;
             }
           }
         });

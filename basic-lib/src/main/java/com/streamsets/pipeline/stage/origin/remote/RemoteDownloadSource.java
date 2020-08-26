@@ -15,7 +15,7 @@
  */
 package com.streamsets.pipeline.stage.origin.remote;
 
-import com.google.common.base.Optional;
+import com.google.common.annotations.VisibleForTesting;
 import com.streamsets.pipeline.api.BatchMaker;
 import com.streamsets.pipeline.api.FileRef;
 import com.streamsets.pipeline.api.Record;
@@ -69,6 +69,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
+import java.util.Optional;
 import java.util.TreeSet;
 import java.util.UUID;
 
@@ -86,7 +87,6 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
   static final String CONTENT_TYPE = "contentType";
   static final String CONTENT_ENCODING = "contentEncoding";
 
-
   private final RemoteDownloadConfigBean conf;
   private final File errorArchive;
   private final byte[] moveBuffer;
@@ -96,13 +96,17 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
   private ELVars rateLimitElVars;
   private String archiveDir;
 
-  //By default true so, between pipeline restarts we can always trigger event.
+  // By default true so, between pipeline restarts we can always trigger event.
   private boolean canTriggerNoMoreDataEvent = true;
   private long noMoreDataRecordCount = 0;
   private long noMoreDataErrorCount = 0;
   private long noMoreDataFileCount = 0;
   private long perFileRecordCount = 0;
   private long perFileErrorCount = 0;
+
+  private final FileDelayer fileDelayer;
+
+  private boolean checkBatchSize = true;
 
   private final NavigableSet<RemoteFile> fileQueue = new TreeSet<>(new Comparator<RemoteFile>() {
     @Override
@@ -126,8 +130,9 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
   private FileFilter fileFilter;
   private RemoteDownloadSourceDelegate delegate;
 
-  public RemoteDownloadSource(RemoteDownloadConfigBean conf) {
+  public RemoteDownloadSource(RemoteDownloadConfigBean conf, FileDelayer fileDelayer) {
     this.conf = conf;
+    this.fileDelayer = fileDelayer;
     if (conf.errorArchiveDir != null && !conf.errorArchiveDir.isEmpty()) {
       this.errorArchive = new File(conf.errorArchiveDir);
       this.moveBuffer = new byte[64 * 1024];
@@ -214,10 +219,17 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
 
   @Override
   public String produce(String lastSourceOffset, int maxBatchSize, BatchMaker batchMaker) throws StageException {
-    final int batchSize = Math.min(maxBatchSize, conf.basic.maxBatchSize);
-    // Just started up, currentOffset has not yet been set.
     // This method returns NOTHING_READ when only no events have ever been read
-    if (currentOffset == null) {
+    final int batchSize = Math.min(maxBatchSize, conf.basic.maxBatchSize);
+    if (!getContext().isPreview() && checkBatchSize && conf.basic.maxBatchSize > maxBatchSize) {
+      getContext().reportError(Errors.REMOTE_DOWNLOAD_09, maxBatchSize);
+      checkBatchSize = false;
+    }
+
+    // currentOffset is null when we've just started and we haven't processed any files yet.
+    // currentOffset can also be null in the case where we had a problem creating the offset for the first file had (in
+    // which case lastSourceOffset would be MINUS_ONE) and we've already dealt with it.
+    if (currentOffset == null && !MINUS_ONE.equals(lastSourceOffset)) {
       if(StringUtils.isEmpty(lastSourceOffset) || NOTHING_READ.equals(lastSourceOffset)) {
         LOG.debug("Detected invalid source offset '{}'", lastSourceOffset);
 
@@ -239,7 +251,7 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
 
     String offset = NOTHING_READ;
     try {
-      Optional<RemoteFile> nextOpt = null;
+      Optional<RemoteFile> nextOpt;
       // Time to read the next file
       if (currentStream == null) {
         nextOpt = getNextFile();
@@ -254,9 +266,10 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
             perFileErrorCount = 0;
 
             LOG.debug("Sending New File Event. File: {}", next.getFilePath());
-            NewFileEvent.EVENT_CREATOR.create(getContext())
-                .with(NewFileEvent.FILE_PATH, next.getFilePath())
-                .createAndSend();
+            NewFileEvent.EVENT_CREATOR.create(getContext()).with(
+                NewFileEvent.FILE_PATH,
+                RemoteFile.getAbsolutePathFileName(conf.remoteConfig.remoteAddress, next.getFilePath())
+            ).createAndSend();
             sendLineageEvent(next);
 
             currentOffset = delegate.createOffset(next.getFilePath());
@@ -264,19 +277,26 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
           if (conf.dataFormat == DataFormat.WHOLE_FILE) {
             Map<String, Object> metadata = new HashMap<>(7);
             long size = delegate.populateMetadata(next.getFilePath(), metadata);
-            metadata.put(HeaderAttributeConstants.FILE, next.getFilePath());
+            metadata.put(HeaderAttributeConstants.FILE, RemoteFile.getAbsolutePathFileName(conf.remoteConfig.remoteAddress, next.getFilePath()));
             metadata.put(HeaderAttributeConstants.FILE_NAME, FilenameUtils.getName(next.getFilePath()));
             metadata.put(REMOTE_URI, remoteURI.toString());
 
-            FileRef fileRef = new RemoteSourceFileRef.Builder()
-                .bufferSize(conf.dataFormatConfig.wholeFileMaxObjectLen)
-                .totalSizeInBytes(size)
-                .rateLimit(FileRefUtil.evaluateAndGetRateLimit(rateLimitElEval, rateLimitElVars, conf.dataFormatConfig.rateLimit))
-                .remoteFile(next)
-                .remoteUri(remoteURI)
-                .createMetrics(true)
-                .build();
-            parser = conf.dataFormatConfig.getParserFactory().getParser(currentOffset.offsetStr, metadata, fileRef);
+            if (!next.isReadable()) {
+              getContext().reportError(Errors.REMOTE_DOWNLOAD_10, next.getFilePath());
+              //Skip over this file
+              currentOffset.setOffset(MINUS_ONE);
+              return currentOffset.offsetStr;
+            } else {
+              FileRef fileRef = new RemoteSourceFileRef.Builder()
+                  .bufferSize(conf.dataFormatConfig.wholeFileMaxObjectLen)
+                  .totalSizeInBytes(size)
+                  .rateLimit(FileRefUtil.evaluateAndGetRateLimit(rateLimitElEval, rateLimitElVars, conf.dataFormatConfig.rateLimit))
+                  .remoteFile(next)
+                  .remoteUri(remoteURI)
+                  .createMetrics(true)
+                  .build();
+              parser = conf.dataFormatConfig.getParserFactory().getParser(currentOffset.offsetStr, metadata, fileRef);
+            }
           } else {
             currentStream = next.createInputStream();
             LOG.info("Started reading file: {}", next.getFilePath());
@@ -332,7 +352,8 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
         Record record = parser.parse();
         if (record != null) {
           record.getHeader().setAttribute(REMOTE_URI, remoteURI.toString());
-          record.getHeader().setAttribute(HeaderAttributeConstants.FILE, next.getFilePath());
+          record.getHeader().setAttribute(HeaderAttributeConstants.FILE,
+              RemoteFile.getAbsolutePathFileName(conf.remoteConfig.remoteAddress, next.getFilePath()));
           record.getHeader().setAttribute(HeaderAttributeConstants.FILE_NAME,
               FilenameUtils.getName(next.getFilePath())
           );
@@ -358,11 +379,13 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
                 perFileRecordCount,
                 perFileErrorCount
             );
-            FinishedFileEvent.EVENT_CREATOR.create(getContext())
-                .with(FinishedFileEvent.FILE_PATH, next.getFilePath())
-                .with(FinishedFileEvent.RECORD_COUNT, perFileRecordCount)
-                .with(FinishedFileEvent.ERROR_COUNT, perFileErrorCount)
-                .createAndSend();
+            FinishedFileEvent.EVENT_CREATOR.create(getContext()).with(
+                FinishedFileEvent.FILE_PATH,
+                RemoteFile.getAbsolutePathFileName(conf.remoteConfig.remoteAddress, next.getFilePath())
+            ).with(FinishedFileEvent.RECORD_COUNT, perFileRecordCount).with(
+                FinishedFileEvent.ERROR_COUNT,
+                perFileErrorCount
+            ).createAndSend();
             handlePostProcessing(next.getFilePath());
           } finally {
             parser = null;
@@ -451,6 +474,7 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
     }
     if (next != null) {
       LOG.error("Error while attempting to parse file: " + next.getFilePath(), ex);
+      getContext().reportError(ex);
     }
     if (ex instanceof FileNotFoundException) {
       LOG.warn("File: {} was found in listing, but is not downloadable", next != null ? next.getFilePath() : "(null)", ex);
@@ -509,10 +533,15 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
   }
 
   private Optional<RemoteFile> getNextFile() throws IOException, StageException {
-    if (fileQueue.isEmpty()) {
+    if (fileQueue.isEmpty() || fileDelayer.isDelayed()) {
+      fileDelayer.setDelayed(false);
       queueFiles();
     }
-    return Optional.fromNullable(fileQueue.pollFirst());
+    Optional<RemoteFile> nextFile = Optional.empty();
+    if (!fileQueue.isEmpty() && fileDelayer.isFileReady(fileQueue.first())) {
+      nextFile = Optional.ofNullable(fileQueue.pollFirst());
+    }
+    return nextFile;
   }
 
   private void queueFiles() throws IOException, StageException {
@@ -601,4 +630,13 @@ public class RemoteDownloadSource extends BaseSource implements FileQueueChecker
     getContext().publishLineageEvent(event);
   }
 
+  @VisibleForTesting
+  RemoteDownloadSourceDelegate getDelegate() {
+    return delegate;
+  }
+
+  @VisibleForTesting
+  void setDelegate(RemoteDownloadSourceDelegate delegate) {
+    this.delegate = delegate;
+  }
 }

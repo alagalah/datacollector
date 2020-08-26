@@ -15,6 +15,7 @@
  */
 package com.streamsets.datacollector.execution.manager.slave;
 
+import com.streamsets.datacollector.config.ConnectionConfiguration;
 import com.streamsets.datacollector.event.dto.PipelineStartEvent;
 import com.streamsets.datacollector.event.handler.remote.RemoteDataCollector;
 import com.streamsets.datacollector.execution.EventListenerManager;
@@ -76,7 +77,9 @@ public class SlavePipelineManager extends AbstractTask implements Manager {
       String name,
       String rev,
       List<PipelineStartEvent.InterceptorConfiguration> interceptorConfs,
-      Function<Object, Void> afterActionsFunction
+      Function<Object, Void> afterActionsFunction,
+      boolean remote,
+      Map<String, ConnectionConfiguration> connections
   ) {
     throw new UnsupportedOperationException();
   }

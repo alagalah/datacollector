@@ -28,7 +28,6 @@ import com.streamsets.pipeline.api.base.configurablestage.DPushSource;
 import com.streamsets.pipeline.config.DataFormat;
 import com.streamsets.pipeline.lib.httpsource.RawHttpConfigs;
 import com.streamsets.pipeline.stage.origin.httpserver.Groups;
-import com.streamsets.pipeline.stage.origin.httpserver.HttpServerPushSource;
 import com.streamsets.pipeline.stage.origin.lib.DataParserFormatConfig;
 import com.streamsets.pipeline.stage.origin.lib.FlowFileDataFormatChooserValues;
 import com.streamsets.pipeline.stage.origin.lib.FlowFileVersion;
@@ -36,21 +35,27 @@ import com.streamsets.pipeline.stage.origin.lib.FlowFileVersionsChooserValues;
 import com.streamsets.pipeline.stage.origin.lib.OuterDataParserFormatConfig;
 
 @StageDef(
-    version = 1,
+    version = 3,
     label = "NiFi HTTP Server",
     description = "Listens for requests from a NiFi HTTP endpoint",
     icon="Apache-nifi-logo.png",
     execution = {ExecutionMode.STANDALONE},
     recordsByRef = true,
+    upgraderDef = "upgrader/NiFiHttpServerDPushSource.yaml",
     onlineHelpRefUrl ="" //TODO
 )
 @ConfigGroups(Groups.class)
 @HideConfigs(value = {
+    "httpConfigs.tlsConfigBean.useRemoteTrustStore",
     "httpConfigs.tlsConfigBean.trustStoreFilePath",
+    "httpConfigs.tlsConfigBean.trustedCertificates",
     "httpConfigs.tlsConfigBean.trustStoreType",
     "httpConfigs.tlsConfigBean.trustStorePassword",
     "httpConfigs.tlsConfigBean.trustStoreAlgorithm",
-    "httpConfigs.needClientAuth"
+    "httpConfigs.needClientAuth",
+    "httpConfigs.useApiGateway",
+    "httpConfigs.serviceName",
+    "httpConfigs.needGatewayAuth"
 })
 @GenerateResourceBundle
 public class NiFiHttpServerDPushSource extends DPushSource {
@@ -64,6 +69,7 @@ public class NiFiHttpServerDPushSource extends DPushSource {
       label = "Max Request Size (MB)",
       defaultValue = "100",
       displayPosition = 30,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "HTTP",
       min = 1,
       max = Integer.MAX_VALUE
@@ -77,6 +83,7 @@ public class NiFiHttpServerDPushSource extends DPushSource {
       description = "Version of FlowFile",
       defaultValue = "FLOWFILE_V3",
       displayPosition = 1,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "DATA_FORMAT"
   )
   @ValueChooserModel(FlowFileVersionsChooserValues.class)
@@ -87,6 +94,7 @@ public class NiFiHttpServerDPushSource extends DPushSource {
       type = ConfigDef.Type.MODEL,
       label = "Data Format",
       displayPosition = 10,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "DATA_FORMAT"
   )
   @ValueChooserModel(FlowFileDataFormatChooserValues.class)
@@ -103,7 +111,7 @@ public class NiFiHttpServerDPushSource extends DPushSource {
         dataFormatConfig,
         flowFileVersion
     );
-    return new HttpServerPushSource(httpConfigs, maxRequestSizeMB, DataFormat.FLOWFILE, outerConfig);
+    return new HttpServerPushSourceNiFi(httpConfigs, maxRequestSizeMB, DataFormat.FLOWFILE, outerConfig);
   }
 
 }

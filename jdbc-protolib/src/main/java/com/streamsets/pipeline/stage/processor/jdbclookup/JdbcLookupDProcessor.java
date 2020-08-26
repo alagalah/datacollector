@@ -27,6 +27,7 @@ import com.streamsets.pipeline.api.base.configurablestage.DProcessor;
 import com.streamsets.pipeline.lib.el.RecordEL;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
 import com.streamsets.pipeline.lib.jdbc.JdbcFieldColumnMapping;
+import com.streamsets.pipeline.lib.jdbc.JdbcHikariPoolConfigBean;
 import com.streamsets.pipeline.stage.common.MissingValuesBehavior;
 import com.streamsets.pipeline.stage.common.MissingValuesBehaviorChooserValues;
 import com.streamsets.pipeline.stage.common.MultipleValuesBehavior;
@@ -37,11 +38,12 @@ import com.streamsets.pipeline.stage.processor.kv.CacheConfig;
 import java.util.List;
 
 @StageDef(
-    version = 3,
+    version = 4,
     label = "JDBC Lookup",
     description = "Lookup values via JDBC to enrich records.",
     icon = "rdbms.png",
     upgrader = JdbcLookupProcessorUpgrader.class,
+    upgraderDef = "upgrader/JdbcLookupDProcessor.yaml",
     onlineHelpRefUrl ="index.html?contextID=task_kbr_2cy_hw"
 )
 @ConfigGroups(Groups.class)
@@ -118,7 +120,22 @@ public class JdbcLookupDProcessor extends DProcessor {
   public int maxBlobSize;
 
   @ConfigDefBean()
-  public HikariPoolConfigBean hikariConfigBean;
+  public JdbcHikariPoolConfigBean hikariConfigBean;
+
+  /**
+   * Returns the Hikari config bean.
+   * <p/>
+   * This method is used to pass the Hikari config bean to the underlaying connector.
+   * <p/>
+   * Subclasses may override this method to provide specific vendor configurations.
+   * <p/>
+   * IMPORTANT: when a subclass is overriding this method to return a specialized HikariConfigBean, the config property
+   * itself in the connector subclass must have the same name as the config property in this class, this is
+   * "hikariConfigBean".
+   */
+  protected HikariPoolConfigBean getHikariConfigBean() {
+    return hikariConfigBean;
+  }
 
   @ConfigDefBean(groups = "JDBC")
   public CacheConfig cacheConfig = new CacheConfig();
@@ -132,7 +149,7 @@ public class JdbcLookupDProcessor extends DProcessor {
       missingValuesBehavior,
       maxClobSize,
       maxBlobSize,
-      hikariConfigBean,
+      getHikariConfigBean(),
       cacheConfig
     );
   }

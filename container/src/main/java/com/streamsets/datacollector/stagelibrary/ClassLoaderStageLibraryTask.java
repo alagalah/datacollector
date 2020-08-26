@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.streamsets.datacollector.classpath.ClasspathValidator;
 import com.streamsets.datacollector.classpath.ClasspathValidatorResult;
+import com.streamsets.datacollector.config.ConnectionDefinition;
 import com.streamsets.datacollector.config.CredentialStoreDefinition;
 import com.streamsets.datacollector.config.ErrorHandlingChooserValues;
 import com.streamsets.datacollector.config.InterceptorDefinition;
@@ -42,6 +43,9 @@ import com.streamsets.datacollector.config.StageDefinition;
 import com.streamsets.datacollector.config.StageLibraryDefinition;
 import com.streamsets.datacollector.config.StageLibraryDelegateDefinitition;
 import com.streamsets.datacollector.config.StatsTargetChooserValues;
+import com.streamsets.datacollector.definition.ConnectionDefinitionExtractor;
+import com.streamsets.datacollector.definition.ConnectionVerifierDefinition;
+import com.streamsets.datacollector.definition.ConnectionVerifierDefinitionExtractor;
 import com.streamsets.datacollector.definition.CredentialStoreDefinitionExtractor;
 import com.streamsets.datacollector.definition.EventDefinitionExtractor;
 import com.streamsets.datacollector.definition.InterceptorDefinitionExtractor;
@@ -73,12 +77,15 @@ import com.streamsets.pipeline.api.ext.json.JsonMapper;
 import com.streamsets.pipeline.api.impl.LocaleInContext;
 import com.streamsets.pipeline.api.impl.Utils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.apache.commons.pool2.BaseKeyedPooledObjectFactory;
 import org.apache.commons.pool2.KeyedObjectPool;
 import org.apache.commons.pool2.PooledObject;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.apache.commons.pool2.impl.GenericKeyedObjectPool;
 import org.apache.commons.pool2.impl.GenericKeyedObjectPoolConfig;
+import org.glassfish.jersey.client.ClientConfig;
+import org.glassfish.jersey.client.ClientProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -89,7 +96,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.net.URL;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -101,7 +111,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -109,7 +124,14 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
   public static final String MAX_PRIVATE_STAGE_CLASS_LOADERS_KEY = "max.stage.private.classloaders";
   public static final int MAX_PRIVATE_STAGE_CLASS_LOADERS_DEFAULT = 50;
 
-  public static final String IGNORE_STAGE_DEFINITIONS = "ignore.stage.definitions";
+  public static String getIgnoreStageDefinitions() {
+    String propertyName = "ignore.stage.definitions";
+    if (Boolean.getBoolean("streamsets.cloud")) {
+      propertyName = "cloud." + propertyName;
+    }
+    return propertyName;
+  }
+
   public static final String JAVA_UNSUPPORTED_REGEXP = "java.unsupported.regexp";
   public static final String MIN_SDC_VERSION = "min.sdc.version";
 
@@ -123,6 +145,9 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
 
   private static final String CONFIG_CP_VALIDATION_RESULT = "stagelibs.classpath.validation.terminate";
   private static final boolean DEFAULT_CP_VALIDATION_RESULT = false;
+
+  public static final String CONFIG_LOAD_THREADS_MAX = "stagelibs.load.threads.max";
+  public static final int DEFAULT_LOAD_THREADS_MAX = Runtime.getRuntime().availableProcessors();
 
   private static final String DEFAULT_REQUIRED_STAGELIBS = "";
 
@@ -149,6 +174,7 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
   private final Configuration configuration;
   private List<? extends ClassLoader> stageClassLoaders;
   private List<StageLibraryDefinition> stageLibraries;
+  private Map<String, StageLibraryDefinition> stageLibraryMap;
   private Map<String, StageDefinition> stageMap;
   private List<StageDefinition> stageList;
   private List<LineagePublisherDefinition> lineagePublisherDefinitions;
@@ -160,11 +186,13 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
   private List<InterceptorDefinition> interceptorList;
   private List<StageLibraryDelegateDefinitition> delegateList;
   private Map<String, StageLibraryDelegateDefinitition> delegateMap;
+  private Map<String, ConnectionDefinition> connectionMap;
+  private Map<String, Set<ConnectionVerifierDefinition>> connectionVerifierMap;
   private ObjectMapper json;
   private KeyedObjectPool<String, ClassLoader> privateClassLoaderPool;
   private Map<String, Object> gaugeMap;
   private final Map<String, EventDefinitionJson> eventDefinitionMap = new HashMap<>();
-  private List<RepositoryManifestJson> repositoryManifestList = null;
+  private volatile List<RepositoryManifestJson> repositoryManifestList = null;
 
   @Inject
   public ClassLoaderStageLibraryTask(RuntimeInfo runtimeInfo, BuildInfo buildInfo, Configuration configuration) {
@@ -262,9 +290,13 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
       validateStageClasspaths();
     }
 
-    // Load all stages and other objects from the libraries
+    String javaVersion = System.getProperty("java.version");
+    Version sdcVersion = new Version(buildInfo.getVersion());
+
+    // Initialize internal structures that keep records of various entities
     json = ObjectMapperFactory.get();
     stageLibraries = new ArrayList<>();
+    stageLibraryMap = new HashMap<>();
     stageList = new ArrayList<>();
     stageMap = new HashMap<>();
     lineagePublisherDefinitions = new ArrayList<>();
@@ -275,8 +307,73 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
     interceptorList = new ArrayList<>();
     delegateList = new ArrayList<>();
     delegateMap = new HashMap<>();
-    loadStages();
+    connectionMap = new HashMap<>();
+    connectionVerifierMap = new HashMap<>();
+
+    // Initialize static classes
+    try {
+      RuntimeEL.loadRuntimeConfiguration(runtimeInfo);
+      DataCollectorServices.instance().put(JsonMapper.SERVICE_KEY, new JsonMapperImpl());
+    } catch (IOException e) {
+      throw new RuntimeException(Utils.format("Could not load runtime configuration, '{}'", e.toString()), e);
+    }
+
+    // Finally load stage libraries, in parallel manner
+    try {
+      long start = System.currentTimeMillis();
+      int maxThreads = configuration.get(CONFIG_LOAD_THREADS_MAX, DEFAULT_LOAD_THREADS_MAX);
+      AtomicBoolean failure = new AtomicBoolean(false);
+
+      ArrayBlockingQueue<ClassLoader> queue = new ArrayBlockingQueue<>(Math.max(stageClassLoaders.size(), 1));
+      queue.addAll(stageClassLoaders);
+
+      ExecutorService executor = Executors.newFixedThreadPool(maxThreads);
+      for(int i = 0; i < maxThreads; i++) {
+        executor.execute(() -> {
+          LocaleInContext.set(Locale.getDefault());
+          ClassLoader cl;
+          while ((cl = queue.poll()) != null) {
+            try {
+              loadStageLibrary(cl, javaVersion, sdcVersion);
+            } catch(Exception e) {
+              LOG.error("Error while loading stage library", e);
+              failure.set(true);
+            }
+          }
+        });
+      }
+
+      executor.shutdown();
+      if(!executor.awaitTermination(20, TimeUnit.MINUTES)) {
+        throw new RuntimeException("Did not load all stage libraries in 20 minutes.");
+      }
+
+      if(failure.get()) {
+        throw new RuntimeException("At least one of the stage libraries failed to load.");
+      }
+
+      LOG.info("Loaded {} libraries with a total of {} stages, {} lineage publishers, {} services, {} interceptors, " +
+              "{} delegates, {} credentialStores, {} connections, and {} connection verifiers in {}",
+          stageLibraries.size(),
+          stageList.size(),
+          lineagePublisherDefinitions.size(),
+          serviceList.size(),
+          interceptorList.size(),
+          delegateList.size(),
+          credentialStoreDefinitions.size(),
+          connectionMap.size(),
+          connectionVerifierMap.size(),
+          DurationFormatUtils.formatDuration(System.currentTimeMillis() - start, "H:m:s.S", false)
+      );
+    } catch (InterruptedException e) {
+      throw new RuntimeException("Failed loading stage libraries", e);
+    } finally {
+      LocaleInContext.set(null);
+    }
+
+    // Ensure that internal structures won't change over time
     stageLibraries = ImmutableList.copyOf(stageLibraries);
+    stageLibraryMap = ImmutableMap.copyOf(stageLibraryMap);
     stageList = ImmutableList.copyOf(stageList);
     stageMap = ImmutableMap.copyOf(stageMap);
     lineagePublisherDefinitions = ImmutableList.copyOf(lineagePublisherDefinitions);
@@ -287,6 +384,8 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
     interceptorList = ImmutableList.copyOf(interceptorList);
     delegateList = ImmutableList.copyOf(delegateList);
     delegateMap = ImmutableMap.copyOf(delegateMap);
+    connectionMap = ImmutableMap.copyOf(connectionMap);
+    connectionVerifierMap = ImmutableMap.copyOf(connectionVerifierMap);
 
     // localization cache for definitions
     localizedStageList = CacheBuilder.newBuilder().build(new CacheLoader<Locale, List<StageDefinition>>() {
@@ -342,8 +441,13 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
     this.gaugeMap.put(PRIVATE_POOL_IDLE, new AtomicInteger(0));
     this.gaugeMap.put(PRIVATE_POOL_MAX, maxPrivateClassloaders);
 
-    // auto load stage library definitions
-    getRepositoryManifestList();
+    if (!Boolean.getBoolean("streamsets.cloud")) {
+      // auto load stage library definitions
+      Thread thread = new Thread(this::getRepositoryManifestList);
+      thread.setDaemon(true);
+      thread.setName("ManifestFetcher");
+      thread.start();
+    }
   }
 
   /**
@@ -408,8 +512,8 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
 
     for(StageDefinition stage : stageList) {
       for(ServiceDependencyDefinition service : stage.getServices()) {
-        if(!serviceMap.containsKey(service.getService())) {
-          missingServices.add(Utils.format("Stage {} is missing service {}", stage.getName(), service.getService().getName()));
+        if(!serviceMap.containsKey(service.getServiceClass())) {
+          missingServices.add(Utils.format("Stage {} is missing service {}", stage.getName(), service.getServiceClass().getName()));
         }
       }
     }
@@ -465,7 +569,7 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
   Set<String> loadIgnoreStagesList(StageLibraryDefinition libDef) throws IOException {
     Set<String> ignoreStages = new HashSet<>();
 
-    String ignore = getPropertyFromLibraryProperties(libDef.getClassLoader(), IGNORE_STAGE_DEFINITIONS, "");
+    String ignore = getPropertyFromLibraryProperties(libDef.getClassLoader(), getIgnoreStageDefinitions(), "");
     if(!StringUtils.isEmpty(ignore)) {
       ignoreStages.addAll(Splitter.on(",").trimResults().splitToList(ignore));
     }
@@ -488,151 +592,194 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
     return list;
   }
 
-  @VisibleForTesting
-  @SuppressWarnings("unchecked")
-  void loadStages() {
-    String javaVersion = System.getProperty("java.version");
-    Version sdcVersion = new Version(buildInfo.getVersion());
+  private void loadStageLibrary(ClassLoader cl, String javaVersion, Version sdcVersion) {
+    LOG.debug("Found stage library '{}'", StageLibraryUtils.getLibraryName(cl));
 
-    if (LOG.isDebugEnabled()) {
-      for (ClassLoader cl : stageClassLoaders) {
-        LOG.debug("Found stage library '{}'", StageLibraryUtils.getLibraryName(cl));
-      }
-    }
-
-    try {
-      RuntimeEL.loadRuntimeConfiguration(runtimeInfo);
-      DataCollectorServices.instance().put(JsonMapper.SERVICE_KEY, new JsonMapperImpl());
-    } catch (IOException e) {
-      throw new RuntimeException(
-        Utils.format("Could not load runtime configuration, '{}'", e.toString()), e);
-    }
+    // Local structures
+    Map<String, StageDefinition> localStageMap = new HashMap<>();
+    List<StageDefinition> localStageList = new LinkedList<>();
+    List<LineagePublisherDefinition> localLineagePublisherDefinitions = new LinkedList<>();
+    Map<String, LineagePublisherDefinition> localLineagePublisherDefinitionMap = new HashMap<>();
+    List<CredentialStoreDefinition> localCredentialStoreDefinitions = new LinkedList<>();
+    List<ServiceDefinition> localServiceList = new LinkedList<>();
+    Map<Class, ServiceDefinition> localServiceMap= new HashMap<>();
+    List<InterceptorDefinition> localInterceptorList = new LinkedList<>();
+    List<StageLibraryDelegateDefinitition> localDelegateList = new LinkedList<>();
+    Map<String, StageLibraryDelegateDefinitition> localDelegateMap = new HashMap<>();
+    Map<String, EventDefinitionJson> localEventDefinitionMap = new HashMap<>();
+    List<ConnectionDefinition> localConnectionList = new LinkedList<>();
+    List<ConnectionVerifierDefinition> localConnectionVerifierList = new LinkedList<>();
 
     try {
-      int libs = 0;
-      int stages = 0;
-      int lineagePublishers = 0;
-      int credentialStores = 0;
-      int services = 0;
-      int interceptors = 0;
-      int delegates = 0;
-      long start = System.currentTimeMillis();
-      LocaleInContext.set(Locale.getDefault());
-      for (ClassLoader cl : stageClassLoaders) {
-        try {
-          // Before loading any stages, let's verify that given stage library is compatible with our current JVM version
-          String unsupportedJvmVersion = getPropertyFromLibraryProperties(cl, JAVA_UNSUPPORTED_REGEXP, null);
-          if(!StringUtils.isEmpty(unsupportedJvmVersion)) {
-            if(javaVersion.matches(unsupportedJvmVersion)) {
-              LOG.warn("Can't load stages from {} since they are not compatible with current JVM version", StageLibraryUtils.getLibraryName(cl));
-              continue;
-            } else {
-              LOG.debug("Stage lib {} passed java compatibility test for '{}'", StageLibraryUtils.getLibraryName(cl), unsupportedJvmVersion);
-            }
-          }
-
-          // And that this SDC is at least on requested version
-          String minSdcVersion = getPropertyFromLibraryProperties(cl, MIN_SDC_VERSION, null);
-          if(!StringUtils.isEmpty(minSdcVersion)) {
-            if(!sdcVersion.isGreaterOrEqualTo(minSdcVersion)) {
-              throw new IllegalArgumentException(
-                  Utils.format("Can't load stage library '{}' as it requires at least SDC version {} whereas current version is {}",
-                  StageLibraryUtils.getLibraryName(cl),
-                  minSdcVersion,
-                  buildInfo.getVersion()
-                ));
-            }
-          }
-
-          // Load stages from the stage library
-          StageLibraryDefinition libDef = StageLibraryDefinitionExtractor.get().extract(cl);
-          libDef.setVersion(getPropertyFromLibraryProperties(cl, "version", ""));
-          LOG.debug("Loading stages and plugins from library '{}' on version {}", libDef.getName(), libDef.getVersion());
-          stageLibraries.add(libDef);
-          libs++;
-
-          // Load Stages
-          for(Class klass : loadClassesFromResource(libDef, cl, STAGES_DEFINITION_RESOURCE)) {
-            stages++;
-            StageDefinition stage = StageDefinitionExtractor.get().extract(libDef, klass, Utils.formatL("Library='{}'", libDef.getName()));
-            String key = createKey(libDef.getName(), stage.getName());
-            LOG.debug("Loaded stage '{}'  version {}", key, stage.getVersion());
-            stageList.add(stage);
-            stageMap.put(key, stage);
-
-            for(Class eventDefClass : stage.getEventDefs()) {
-              if (!eventDefinitionMap.containsKey(eventDefClass.getCanonicalName())) {
-                eventDefinitionMap.put(
-                    eventDefClass.getCanonicalName(),
-                    EventDefinitionExtractor.get().extractEventDefinition(eventDefClass)
-                );
-              }
-            }
-          }
-
-          // Load Lineage publishers
-          for(Class klass : loadClassesFromResource(libDef, cl, LINEAGE_PUBLISHERS_DEFINITION_RESOURCE)) {
-            lineagePublishers++;
-            LineagePublisherDefinition lineage = LineagePublisherDefinitionExtractor.get().extract(libDef, klass);
-            String key = createKey(libDef.getName(), lineage.getName());
-            LOG.debug("Loaded lineage plugin '{}'", key);
-            lineagePublisherDefinitions.add(lineage);
-            lineagePublisherDefinitionMap.put(key, lineage);
-          }
-
-          // Load Credential stores
-          for(Class klass : loadClassesFromResource(libDef, cl, CREDENTIAL_STORE_DEFINITION_RESOURCE)) {
-            credentialStores++;
-            CredentialStoreDefinition def = CredentialStoreDefinitionExtractor.get().extract(libDef, klass);
-            String key = createKey(libDef.getName(), def.getName());
-            LOG.debug("Loaded credential store '{}'", key);
-            credentialStoreDefinitions.add(def);
-          }
-
-          // Load Services
-          for(Class klass : loadClassesFromResource(libDef, cl, SERVICE_DEFINITION_RESOURCE)) {
-            services++;
-            ServiceDefinition def = ServiceDefinitionExtractor.get().extract(libDef, klass);
-            LOG.debug("Loaded service for '{}'", def.getProvides().getCanonicalName());
-            serviceList.add(def);
-            serviceMap.put(def.getProvides(), def);
-          }
-
-          // Load Interceptors
-          for(Class klass : loadClassesFromResource(libDef, cl, INTERCEPTOR_DEFINITION_RESOURCE)) {
-            interceptors++;
-            InterceptorDefinition def = InterceptorDefinitionExtractor.get().extract(libDef, klass);
-            LOG.debug("Loaded interceptor '{}'", def.getKlass().getCanonicalName());
-            interceptorList.add(def);
-          }
-
-          // Load Delegates
-          for(Class klass : loadClassesFromResource(libDef, cl, DELEGATE_DEFINITION_RESOURCE)) {
-            delegates++;
-            StageLibraryDelegateDefinitition def = StageLibraryDelegateDefinitionExtractor.get().extract(libDef, klass);
-            String key = createKey(libDef.getName(), def.getExportedInterface().getCanonicalName());
-            LOG.debug("Loaded delegate '{}'", def.getKlass().getCanonicalName());
-            delegateList.add(def);
-            delegateMap.put(key, def);
-          }
-        } catch (IOException | ClassNotFoundException ex) {
-          throw new RuntimeException(
-              Utils.format("Could not load stages definition from '{}', {}", cl, ex.toString()), ex);
+      // Before loading any stages, let's verify that given stage library is compatible with our current JVM version
+      String unsupportedJvmVersion = getPropertyFromLibraryProperties(cl, JAVA_UNSUPPORTED_REGEXP, null);
+      if(!StringUtils.isEmpty(unsupportedJvmVersion)) {
+        if(javaVersion.matches(unsupportedJvmVersion)) {
+          LOG.warn("Can't load stages from {} since they are not compatible with current JVM version", StageLibraryUtils.getLibraryName(cl));
+          return;
+        } else {
+          LOG.debug("Stage lib {} passed java compatibility test for '{}'", StageLibraryUtils.getLibraryName(cl), unsupportedJvmVersion);
         }
       }
-      LOG.info(
-        "Loaded '{}' libraries with a total of '{}' stages, '{}' lineage publishers, '{}' services, '{}' interceptors, '{}' delegates and '{}' credentialStores in '{}ms'",
-        libs,
-        stages,
-        lineagePublishers,
-        services,
-        interceptors,
-        delegates,
-        credentialStores,
-        System.currentTimeMillis() - start
-      );
-    } finally {
-      LocaleInContext.set(null);
+
+      // And that this SDC is at least on requested version
+      String minSdcVersion = getPropertyFromLibraryProperties(cl, MIN_SDC_VERSION, null);
+      if(!StringUtils.isEmpty(minSdcVersion)) {
+        if(!sdcVersion.isGreaterOrEqualTo(minSdcVersion)) {
+          throw new IllegalArgumentException(
+              Utils.format("Can't load stage library '{}' as it requires at least SDC version {} whereas current version is {}",
+              StageLibraryUtils.getLibraryName(cl),
+              minSdcVersion,
+              buildInfo.getVersion()
+            ));
+        }
+      }
+
+      // Load stages from the stage library
+      StageLibraryDefinition libDef = StageLibraryDefinitionExtractor.get().extract(cl);
+      libDef.setVersion(getPropertyFromLibraryProperties(cl, "version", ""));
+      LOG.debug("Loading stages and plugins from library '{}' on version {}", libDef.getName(), libDef.getVersion());
+      synchronized (stageLibraries) {
+        stageLibraries.add(libDef);
+      }
+      synchronized (stageLibraryMap) {
+        stageLibraryMap.put(libDef.getName(), libDef);
+      }
+
+      // Load Stages
+      for(Class klass : loadClassesFromResource(libDef, cl, STAGES_DEFINITION_RESOURCE)) {
+        StageDefinition stage = StageDefinitionExtractor.get().extract(libDef, klass, Utils.formatL("Library='{}'", libDef.getName()));
+        String key = createKey(libDef.getName(), stage.getName());
+        LOG.debug("Loaded stage '{}'  version {}", key, stage.getVersion());
+        localStageList.add(stage);
+        localStageMap.put(key, stage);
+
+        for(Class eventDefClass : stage.getEventDefs()) {
+          if (!localEventDefinitionMap.containsKey(eventDefClass.getCanonicalName())) {
+            localEventDefinitionMap.put(
+                eventDefClass.getCanonicalName(),
+                EventDefinitionExtractor.get().extractEventDefinition(eventDefClass)
+            );
+          }
+        }
+      }
+      synchronized (stageMap) {
+        stageMap.putAll(localStageMap);
+      }
+      synchronized (stageList) {
+        stageList.addAll(localStageList);
+      }
+      synchronized (eventDefinitionMap) {
+        eventDefinitionMap.putAll(localEventDefinitionMap);
+      }
+
+      // Load Lineage publishers
+      for(Class klass : loadClassesFromResource(libDef, cl, LINEAGE_PUBLISHERS_DEFINITION_RESOURCE)) {
+        LineagePublisherDefinition lineage = LineagePublisherDefinitionExtractor.get().extract(libDef, klass);
+        String key = createKey(libDef.getName(), lineage.getName());
+        LOG.debug("Loaded lineage plugin '{}'", key);
+        localLineagePublisherDefinitions.add(lineage);
+        localLineagePublisherDefinitionMap.put(key, lineage);
+      }
+      synchronized (lineagePublisherDefinitions) {
+        lineagePublisherDefinitions.addAll(localLineagePublisherDefinitions);
+      }
+      synchronized (lineagePublisherDefinitionMap) {
+        lineagePublisherDefinitionMap.putAll(localLineagePublisherDefinitionMap);
+      }
+
+      // Load Credential stores
+      for(Class klass : loadClassesFromResource(libDef, cl, CREDENTIAL_STORE_DEFINITION_RESOURCE)) {
+        CredentialStoreDefinition def = CredentialStoreDefinitionExtractor.get().extract(libDef, klass);
+        String key = createKey(libDef.getName(), def.getName());
+        LOG.debug("Loaded credential store '{}'", key);
+        localCredentialStoreDefinitions.add(def);
+      }
+      synchronized (credentialStoreDefinitions) {
+        credentialStoreDefinitions.addAll(localCredentialStoreDefinitions);
+      }
+
+      // Load Services
+      for(Class klass : loadClassesFromResource(libDef, cl, SERVICE_DEFINITION_RESOURCE)) {
+        ServiceDefinition def = ServiceDefinitionExtractor.get().extract(libDef, klass);
+        LOG.debug("Loaded service for '{}'", def.getProvides().getCanonicalName());
+        localServiceList.add(def);
+        localServiceMap.put(def.getProvides(), def);
+      }
+      synchronized (serviceList) {
+        serviceList.addAll(localServiceList);
+      }
+      synchronized (serviceMap) {
+        serviceMap.putAll(localServiceMap);
+      }
+
+      // Load Interceptors
+      for(Class klass : loadClassesFromResource(libDef, cl, INTERCEPTOR_DEFINITION_RESOURCE)) {
+        InterceptorDefinition def = InterceptorDefinitionExtractor.get().extract(libDef, klass);
+        LOG.debug("Loaded interceptor '{}'", def.getKlass().getCanonicalName());
+        localInterceptorList.add(def);
+      }
+      synchronized (interceptorList) {
+        interceptorList.addAll(localInterceptorList);
+      }
+
+      // Load Delegates
+      for(Class klass : loadClassesFromResource(libDef, cl, DELEGATE_DEFINITION_RESOURCE)) {
+        StageLibraryDelegateDefinitition def = StageLibraryDelegateDefinitionExtractor.get().extract(libDef, klass);
+        String key = createKey(libDef.getName(), def.getExportedInterface().getCanonicalName());
+        LOG.debug("Loaded delegate '{}'", def.getKlass().getCanonicalName());
+        localDelegateList.add(def);
+        localDelegateMap.put(key, def);
+      }
+      synchronized (delegateList) {
+        delegateList.addAll(localDelegateList);
+      }
+      synchronized (delegateMap) {
+        delegateMap.putAll(localDelegateMap);
+      }
+
+      // Load Connections
+      for (Class klass : loadClassesFromResource(libDef, cl, CONNECTIONS_DEFINITION_RESOURCE)) {
+        ConnectionDefinition def = ConnectionDefinitionExtractor.get().extract(libDef, klass);
+        LOG.debug("Loaded connection '{}' from '{}'", def.getType(), libDef.getName());
+        localConnectionList.add(def);
+      }
+      synchronized (connectionMap) {
+        localConnectionList.forEach(connectionDefinition -> {
+          ConnectionDefinition prevConnectionDefinition = connectionMap.get(connectionDefinition.getType());
+          if (prevConnectionDefinition != null) {
+            // We'll use the oldest version available when there's a conflict because it'll be the most compatible
+            if (prevConnectionDefinition.getVersion() > connectionDefinition.getVersion()) {
+              LOG.debug("Found connection version conflict for '{}' ({} vs {}), using {}",
+                  connectionDefinition.getType(), connectionDefinition.getVersion(),
+                  prevConnectionDefinition.getVersion(), prevConnectionDefinition.getVersion());
+              connectionMap.put(connectionDefinition.getType(), connectionDefinition);
+            }
+          } else {
+            connectionMap.put(connectionDefinition.getType(), connectionDefinition);
+          }
+        });
+
+      }
+
+      // Load Connection Verifiers
+      for(Class klass : loadClassesFromResource(libDef, cl, CONNECTION_VERIFIERS_DEFINITION_RESOURCE)) {
+        ConnectionVerifierDefinition def = ConnectionVerifierDefinitionExtractor.get().extract(libDef, klass);
+        LOG.debug("Loaded connection verifier: '{}' from '{}'", def.getVerifierType(), libDef.getName());
+        localConnectionVerifierList.add(def);
+      }
+      synchronized (connectionVerifierMap) {
+        localConnectionVerifierList.forEach(connectionVerifierDefinition -> {
+          Set<ConnectionVerifierDefinition> existingConnectionVerifierSet =
+              connectionVerifierMap.computeIfAbsent(connectionVerifierDefinition.getVerifierType(),
+                  k -> new HashSet<>());
+          existingConnectionVerifierSet.add(connectionVerifierDefinition);
+        });
+      }
+
+    } catch (IOException | ClassNotFoundException ex) {
+      throw new RuntimeException(
+          Utils.format("Could not load stages definition from '{}', {}", cl, ex.toString()), ex);
     }
   }
 
@@ -920,7 +1067,9 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
 
   @Override
   public List<RepositoryManifestJson> getRepositoryManifestList() {
-    if (repositoryManifestList == null) {
+    if (repositoryManifestList == null &&  !Boolean.getBoolean("streamsets.cloud")) {
+      Instant start = Instant.now();
+
       // initialize when it is called for first time
       repositoryManifestList = new ArrayList<>();
 
@@ -1018,6 +1167,10 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
         additionalRepo.setStageLibraries(additionalList);
         repositoryManifestList.add(additionalRepo);
       }
+
+      Instant end = Instant.now();
+      Duration timeElapsed = Duration.between(start, end);
+      LOG.debug("Time taken for fetching repository manifest files : "+ timeElapsed.getSeconds() + " seconds");
     }
 
     return repositoryManifestList;
@@ -1063,6 +1216,11 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
       "streamsets-datacollector-hdp_2_4-lib",
       "streamsets-datacollector-hdp_2_5-flume-lib",
       "streamsets-datacollector-hdp_2_5-lib",
+      "streamsets-datacollector-hdp_2_6-lib",
+      "streamsets-datacollector-hdp_2_6_1-hive1-lib",
+      "streamsets-datacollector-hdp_2_6_2-hive1-lib",
+      "streamsets-datacollector-hdp_2_6-hive2-lib",
+      "streamsets-datacollector-hdp_2_6-flume-lib",
       "streamsets-datacollector-mapr_5_0-lib",
       "streamsets-datacollector-mapr_5_1-lib"
     );
@@ -1074,8 +1232,11 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
   }
 
   private RepositoryManifestJson getRepositoryManifestFile(String repoUrl) {
+    ClientConfig clientConfig = new ClientConfig();
+    clientConfig.property(ClientProperties.READ_TIMEOUT, 2000);
+    clientConfig.property(ClientProperties.CONNECT_TIMEOUT, 2000);
     RepositoryManifestJson repositoryManifestJson = null;
-    try (Response response = ClientBuilder.newClient().target(repoUrl).request().get()) {
+    try (Response response = ClientBuilder.newClient(clientConfig).target(repoUrl).request().get()) {
       InputStream inputStream = response.readEntity(InputStream.class);
       repositoryManifestJson = ObjectMapperFactory.get().readValue(inputStream, RepositoryManifestJson.class);
     } catch (Exception ex) {
@@ -1100,4 +1261,23 @@ public class ClassLoaderStageLibraryTask extends AbstractTask implements StageLi
     ((AtomicInteger)this.gaugeMap.get(PRIVATE_POOL_IDLE)).set(privateClassLoaderPool.getNumIdle());
   }
 
+  @Override
+  public StageLibraryDefinition getStageLibraryDefinition(String libraryName) {
+    return this.stageLibraryMap.get(libraryName);
+  }
+
+  @Override
+  public Collection<ConnectionDefinition> getConnections() {
+    return connectionMap.values();
+  }
+
+  @Override
+  public ConnectionDefinition getConnection(String type) {
+    return connectionMap.get(type);
+  }
+
+  @Override
+  public Set<ConnectionVerifierDefinition> getConnectionVerifiers(String type) {
+    return connectionVerifierMap.getOrDefault(type, Collections.emptySet());
+  }
 }

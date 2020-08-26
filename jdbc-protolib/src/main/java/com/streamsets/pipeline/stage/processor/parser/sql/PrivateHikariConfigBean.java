@@ -19,6 +19,7 @@ import com.streamsets.pipeline.api.ConfigDef;
 import com.streamsets.pipeline.api.ListBeanModel;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.credential.CredentialValue;
+import com.streamsets.pipeline.lib.jdbc.BrandedHikariPoolConfigBean;
 import com.streamsets.pipeline.lib.jdbc.ConnectionPropertyBean;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
 import com.streamsets.pipeline.lib.jdbc.TransactionIsolationLevel;
@@ -29,6 +30,7 @@ import java.util.List;
 public class PrivateHikariConfigBean {
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.STRING,
       label = "JDBC Connection String",
@@ -40,6 +42,7 @@ public class PrivateHikariConfigBean {
   public String connectionString = "";
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       defaultValue = "true",
@@ -52,6 +55,7 @@ public class PrivateHikariConfigBean {
   public boolean useCredentials;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.CREDENTIAL,
       dependsOn = "useCredentials",
@@ -63,6 +67,7 @@ public class PrivateHikariConfigBean {
   public CredentialValue username;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.CREDENTIAL,
       dependsOn = "useCredentials",
@@ -74,6 +79,7 @@ public class PrivateHikariConfigBean {
   public CredentialValue password;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.MODEL,
       defaultValue = "[]",
@@ -87,21 +93,21 @@ public class PrivateHikariConfigBean {
   @ListBeanModel
   public List<ConnectionPropertyBean> driverProperties = new ArrayList<>();
 
-  private HikariPoolConfigBean underlying;
+  private BrandedHikariPoolConfigBean underlying;
 
   public HikariPoolConfigBean getUnderlying() {
     return underlying;
   }
 
   public List<Stage.ConfigIssue> init(Stage.Context context, List<Stage.ConfigIssue> issues) {
-    underlying = new HikariPoolConfigBean();
+    underlying = new BrandedHikariPoolConfigBean();
     underlying.connectionString = connectionString;
     underlying.useCredentials = useCredentials;
     underlying.username = username;
     underlying.password = password;
     underlying.driverProperties = driverProperties;
     underlying.readOnly = true;
-    underlying.autoCommit = true;
+    underlying.setAutoCommit(true);
     underlying.connectionTimeout = HikariPoolConfigBean.DEFAULT_CONNECTION_TIMEOUT;
     underlying.idleTimeout = HikariPoolConfigBean.DEFAULT_IDLE_TIMEOUT;
     underlying.maxLifetime = HikariPoolConfigBean.DEFAULT_MAX_LIFETIME;

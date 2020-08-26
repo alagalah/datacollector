@@ -23,11 +23,15 @@ import com.streamsets.pipeline.api.HideConfigs;
 import com.streamsets.pipeline.api.PushSource;
 import com.streamsets.pipeline.api.StageDef;
 import com.streamsets.pipeline.api.base.configurablestage.DPushSource;
+import com.streamsets.pipeline.lib.event.NoMoreDataEvent;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
+import com.streamsets.pipeline.lib.jdbc.JdbcHikariPoolConfigBean;
+import com.streamsets.pipeline.lib.jdbc.multithread.SchemaFinishedEvent;
+import com.streamsets.pipeline.lib.jdbc.multithread.TableFinishedEvent;
 import com.streamsets.pipeline.stage.origin.jdbc.CommonSourceConfigBean;
 
 @StageDef(
-    version = 5,
+    version = 10,
     label = "JDBC Multitable Consumer",
     description = "Reads data from a JDBC source using table names.",
     icon = "rdbms_multithreaded.png",
@@ -35,10 +39,11 @@ import com.streamsets.pipeline.stage.origin.jdbc.CommonSourceConfigBean;
     recordsByRef = true,
     resetOffset = true,
     producesEvents = true,
+    eventDefs = {NoMoreDataEvent.class, SchemaFinishedEvent.class, TableFinishedEvent.class},
     upgrader = TableJdbcSourceUpgrader.class,
+    upgraderDef = "upgrader/TableJdbcDSource.yaml",
     onlineHelpRefUrl ="index.html?contextID=task_kst_m4w_4y"
 )
-
 @ConfigGroups(value = Groups.class)
 @GenerateResourceBundle
 @HideConfigs({
@@ -46,7 +51,7 @@ import com.streamsets.pipeline.stage.origin.jdbc.CommonSourceConfigBean;
     "commonSourceConfigBean.enableSchemaChanges",
     "commonSourceConfigBean.txnWindow"
 })
-public final class TableJdbcDSource extends DPushSource {
+public class TableJdbcDSource extends DPushSource {
 
   @ConfigDefBean
   public TableJdbcConfigBean tableJdbcConfigBean;
@@ -55,14 +60,43 @@ public final class TableJdbcDSource extends DPushSource {
   public CommonSourceConfigBean commonSourceConfigBean;
 
   @ConfigDefBean
-  public HikariPoolConfigBean hikariConfigBean;
+  public JdbcHikariPoolConfigBean hikariConfigBean;
+
+  /**
+   * Returns the Hikari config bean.
+   * <p/>
+   * This method is used to pass the Hikari config bean to the underlaying connector.
+   * <p/>
+   * Subclasses may override this method to provide specific vendor configurations.
+   * <p/>
+   * IMPORTANT: when a subclass is overriding this method to return a specialized HikariConfigBean, the config property
+   * itself in the connector subclass must have the same name as the config property in this class, this is
+   * "hikariConfigBean".
+   */
+  protected HikariPoolConfigBean getHikariConfigBean() {
+    return hikariConfigBean;
+  }
+
+  /**
+   * Returns the TableJDBC config bean.
+   * <p/>
+   * This method is used to pass the TableJDBC config bean to the underlaying connector.
+   * <p/>
+   * Subclasses may override this method to provide specific vendor configurations.
+   * <p/>
+   * IMPORTANT: when a subclass is overriding this method to return a specialized TableJDBC, the config property
+   * itself in the connector subclass must have the same name as the config property in this class.
+   */
+  protected TableJdbcConfigBean getTableJdbcConfigBean() {
+    return tableJdbcConfigBean;
+  }
 
   @Override
   protected PushSource createPushSource() {
     return new TableJdbcSource(
-        hikariConfigBean,
+        getHikariConfigBean(),
         commonSourceConfigBean,
-        tableJdbcConfigBean
+        getTableJdbcConfigBean()
     );
   }
 }

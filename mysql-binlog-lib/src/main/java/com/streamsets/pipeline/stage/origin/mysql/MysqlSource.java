@@ -62,6 +62,8 @@ public abstract class MysqlSource extends BaseSource {
   private int port;
   private long serverId;
 
+  private boolean checkBatchSize = true;
+
   private final BlockingQueue<ServerException> serverErrors = new LinkedBlockingQueue<>();
 
   private final RecordConverter recordConverter = new RecordConverter(new RecordFactory() {
@@ -138,8 +140,8 @@ public abstract class MysqlSource extends BaseSource {
     // connect to mysql
     HikariConfig hikariConfig = new HikariConfig();
     hikariConfig.setJdbcUrl(String.format("jdbc:mysql://%s:%d", getConfig().hostname, port));
-    hikariConfig.setUsername(getConfig().username);
-    hikariConfig.setPassword(getConfig().password);
+    hikariConfig.setUsername(getConfig().username.get());
+    hikariConfig.setPassword(getConfig().password.get());
     hikariConfig.setReadOnly(true);
     hikariConfig.addDataSourceProperty("useSSL", getConfig().useSsl);
     try {
@@ -160,8 +162,8 @@ public abstract class MysqlSource extends BaseSource {
     BinaryLogClient binLogClient = new BinaryLogClient(
         getConfig().hostname,
         port,
-        getConfig().username,
-        getConfig().password
+        getConfig().username.get(),
+        getConfig().password.get()
     );
     if (getConfig().useSsl) {
       binLogClient.setSSLMode(SSLMode.REQUIRED);
@@ -214,6 +216,12 @@ public abstract class MysqlSource extends BaseSource {
 
     int recordCounter = 0;
     int batchSize = getConfig().maxBatchSize > maxBatchSize ? maxBatchSize : getConfig().maxBatchSize;
+    if (!getContext().isPreview() && checkBatchSize && getConfig().maxBatchSize > maxBatchSize) {
+      getContext().reportError(Errors.MYSQL_010, maxBatchSize);
+      checkBatchSize = false;
+    }
+
+
     long startTime = System.currentTimeMillis();
     while (recordCounter < batchSize && (startTime + getConfig().maxWaitTime) > System.currentTimeMillis()) {
       long timeLeft = getConfig().maxWaitTime - (System.currentTimeMillis() - startTime);

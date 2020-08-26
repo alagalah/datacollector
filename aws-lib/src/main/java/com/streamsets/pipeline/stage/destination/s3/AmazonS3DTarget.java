@@ -28,12 +28,13 @@ import com.streamsets.pipeline.api.service.dataformats.DataFormatGeneratorServic
 import com.streamsets.pipeline.lib.event.WholeFileProcessedEvent;
 
 @StageDef(
-    version = 11,
+    version = 13,
     label = "Amazon S3",
     description = "Writes to Amazon S3",
     icon = "s3.png",
     privateClassLoader = true,
     upgrader = AmazonS3TargetUpgrader.class,
+    upgraderDef = "upgrader/AmazonS3DTarget.yaml",
     producesEvents = true,
     eventDefs = {WholeFileProcessedEvent.class},
     onlineHelpRefUrl ="index.html?contextID=task_pxb_j3r_rt",
@@ -64,6 +65,6 @@ public class AmazonS3DTarget extends DTarget {
 
   @Override
   protected Target createTarget() {
-    return new AmazonS3Target(s3TargetConfigBean);
+    return new AmazonS3Target(s3TargetConfigBean, false);
   }
 }

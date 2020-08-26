@@ -45,7 +45,7 @@ public class TestPipeBatch {
     List<Issue> errors = new ArrayList<>();
     StageLibraryTask library = MockStages.createStageLibrary();
     PipelineConfiguration pipelineConf = MockStages.createPipelineConfigurationSourceTarget();
-    PipelineBean pipelineBean = PipelineBeanCreator.get().create(false, library, pipelineConf, null, errors);
+    PipelineBean pipelineBean = PipelineBeanCreator.get().create(false, library, pipelineConf, null, null, null, errors);
     if (pipelineBean == null) {
       Assert.fail(errors.toString());
     }
@@ -290,7 +290,7 @@ public class TestPipeBatch {
     Record copiedRecordY = pipeBatch.getFullPayload().get("y").get(0);
 
     assertEquals(origRecord, copiedRecordX);
-    Assert.assertNotSame(origRecord, copiedRecordX);
+    Assert.assertSame(origRecord, copiedRecordX);
 
     assertEquals(origRecord, copiedRecordY);
     Assert.assertNotSame(origRecord, copiedRecordY);

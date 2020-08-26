@@ -21,7 +21,7 @@ import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.ValueChooserModel;
 import com.streamsets.pipeline.config.DataFormat;
 import com.streamsets.pipeline.config.JsonMode;
-import com.streamsets.pipeline.lib.aws.AwsRegion;
+import com.streamsets.pipeline.stage.lib.aws.AwsRegion;
 import com.streamsets.pipeline.stage.common.DataFormatGroups;
 import com.streamsets.pipeline.stage.destination.lib.DataGeneratorFormatConfig;
 import com.streamsets.pipeline.stage.lib.kinesis.Errors;
@@ -68,6 +68,7 @@ public class FirehoseConfigBean extends KinesisConfigBean {
       label = "Maximum Record Size (KB)",
       description = "Records larger than this will be sent to the error pipeline.",
       displayPosition = 30,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "#0"
   )
   public int maxRecordSize = 1000;

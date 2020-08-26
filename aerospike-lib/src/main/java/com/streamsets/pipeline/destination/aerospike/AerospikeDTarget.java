@@ -32,6 +32,7 @@ import java.util.List;
     description = "Writes data to Aerospike",
     icon = "aerospike.png",
     upgrader = AerospikeTargetUpgrader.class,
+    upgraderDef = "upgrader/AerospikeDTarget.yaml",
     onlineHelpRefUrl = "index.html?contextID=task_j3q_tpr_4cb"
 )
 @ConfigGroups(value = Groups.class)
@@ -84,6 +85,7 @@ public class AerospikeDTarget extends DTarget {
       label = "Default Operation",
       description = "Default operation to perform if sdc.operation.type is not set in record header.",
       displayPosition = 65,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "MAPPING"
   )
   @ValueChooserModel(AerospikeOperationChooserValues.class)
@@ -96,6 +98,7 @@ public class AerospikeDTarget extends DTarget {
       label = "Unsupported Operation Handling",
       description = "Action to take when operation type is not supported",
       displayPosition = 67,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       group = "MAPPING"
   )
   @ValueChooserModel(UnsupportedOperationActionChooserValues.class)

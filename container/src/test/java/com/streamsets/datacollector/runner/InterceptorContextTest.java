@@ -21,11 +21,10 @@ import com.streamsets.datacollector.config.StageConfiguration;
 import com.streamsets.datacollector.email.EmailSender;
 import com.streamsets.datacollector.json.ObjectMapperFactory;
 import com.streamsets.datacollector.lineage.LineagePublisherDelegator;
+import com.streamsets.datacollector.main.ProductBuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.restapi.bean.DetachedStageConfigurationJson;
-import com.streamsets.datacollector.restapi.bean.StageConfigurationJson;
 import com.streamsets.datacollector.util.Configuration;
-import com.streamsets.pipeline.api.BlobStore;
 import com.streamsets.pipeline.api.DeliveryGuarantee;
 import com.streamsets.pipeline.api.ExecutionMode;
 import com.streamsets.pipeline.api.Processor;
@@ -42,18 +41,17 @@ import static org.junit.Assert.assertNull;
 
 public class InterceptorContextTest {
 
-  private BlobStore blobStore;
   private Configuration configuration;
   private InterceptorContext context;
 
   @Before
   public void setUp() {
-    this.blobStore = Mockito.mock(BlobStore.class);
-    this.configuration = Mockito.mock(Configuration.class);
+    MockStages.resetStageCaptures();
+    this.configuration = new Configuration();
 
     this.context = new InterceptorContext(
       InterceptorCreator.InterceptorType.PRE_STAGE,
-      blobStore,
+      null,
       configuration,
       "stageInstance",
       "metricName",
@@ -67,6 +65,7 @@ public class InterceptorContextTest {
       Mockito.mock(MetricRegistry.class),
       ExecutionMode.STANDALONE,
       DeliveryGuarantee.AT_LEAST_ONCE,
+      ProductBuildInfo.getDefault(),
       Mockito.mock(RuntimeInfo.class),
       Mockito.mock(EmailSender.class),
       0,

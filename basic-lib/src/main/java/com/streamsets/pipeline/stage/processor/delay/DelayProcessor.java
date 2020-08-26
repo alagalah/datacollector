@@ -44,6 +44,7 @@ import java.util.Iterator;
 
     },
     flags = StageBehaviorFlags.PASSTHROUGH,
+    upgraderDef = "upgrader/DelayProcessor.yaml",
     onlineHelpRefUrl ="index.html?contextID=task_jh5_qxf_wbb"
 )
 public class DelayProcessor extends SingleLaneRecordProcessor {
@@ -54,6 +55,7 @@ public class DelayProcessor extends SingleLaneRecordProcessor {
       defaultValue = "1000",
       label = "Delay Between Batches",
       description = "Milliseconds to wait before sending records to next stage",
+      displayMode = ConfigDef.DisplayMode.BASIC,
       min = 0,
       max = Integer.MAX_VALUE
   )

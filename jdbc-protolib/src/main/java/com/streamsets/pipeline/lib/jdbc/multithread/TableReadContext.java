@@ -69,11 +69,11 @@ public final class TableReadContext {
     this.vendor = vendor;
     jdbcUtil = UtilsProvider.getJdbcUtil();
     this.query = query;
+    LOGGER.debug("Executing Query :{}", query);
+    LOGGER.debug("Parameter Types And Values {}", paramValuesToSet);
     ps = connection.prepareStatement(query);
     ps.setFetchSize(fetchSize);
     setPreparedStParameters(paramValuesToSet);
-    LOGGER.debug("Executing Query :{}", query);
-    LOGGER.debug("Parameter Types And Values {}", paramValuesToSet);
     rs = ps.executeQuery();
     resetProcessingMetrics();
     this.neverEvict = neverEvict;
@@ -133,6 +133,17 @@ public final class TableReadContext {
                   throw new IllegalStateException(Utils.format("Unsupported type for ORACLE database: {}", sqlType));
               }
             }
+            break;
+          case SQL_SERVER:
+            if(TableContextUtil.VENDOR_PARTITIONABLE_TYPES.get(DatabaseVendor.SQL_SERVER).contains(sqlType)) {
+              if (sqlType == TableContextUtil.TYPE_SQL_SERVER_DATETIMEOFFSET) {
+               // For Microsoft SQL DATETIMEOFFSET field, send the sqlType (-155) hint to the database as well
+               // because otherwise SQLServer complains with - Failed to convert 'Unknown' to 'Unknown' type error
+                ps.setObject(paramIdx, paramVal, sqlType);
+                return;
+              }
+            }
+            break;
         }
         ps.setObject(
             paramIdx,

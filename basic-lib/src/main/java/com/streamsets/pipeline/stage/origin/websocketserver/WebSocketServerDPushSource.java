@@ -31,7 +31,7 @@ import com.streamsets.pipeline.lib.websocket.WebSocketOriginGroups;
 import com.streamsets.pipeline.stage.origin.lib.DataParserFormatConfig;
 
 @StageDef(
-    version = 12,
+    version = 14,
     label = "WebSocket Server",
     description = "Listens for requests on a WebSocket endpoint",
     icon="websockets_multithreaded.png",
@@ -39,13 +39,16 @@ import com.streamsets.pipeline.stage.origin.lib.DataParserFormatConfig;
     recordsByRef = true,
     onlineHelpRefUrl ="index.html?contextID=task_mzv_cvc_3z",
     sendsResponse = true,
-    upgrader = WebSocketServerPushSourceUpgrader.class
+    upgrader = WebSocketServerPushSourceUpgrader.class,
+    upgraderDef = "upgrader/WebSocketServerDPushSource.yaml"
 )
 @ConfigGroups(WebSocketOriginGroups.class)
 @HideConfigs(value = {
     "dataFormatConfig.verifyChecksum",
     "dataFormatConfig.avroSchemaSource",
+    "webSocketConfigs.tlsConfigBean.useRemoteTrustStore",
     "webSocketConfigs.tlsConfigBean.trustStoreFilePath",
+    "webSocketConfigs.tlsConfigBean.trustedCertificates",
     "webSocketConfigs.tlsConfigBean.trustStoreType",
     "webSocketConfigs.tlsConfigBean.trustStorePassword",
     "webSocketConfigs.tlsConfigBean.trustStoreAlgorithm"

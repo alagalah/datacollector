@@ -119,7 +119,7 @@ public class AdminResource {
   @Path("/restart")
   @ApiOperation(value = "Restart SDC", authorizations = @Authorization(value = "basic"))
   @Produces(MediaType.APPLICATION_JSON)
-  @RolesAllowed({AuthzRole.ADMIN, AuthzRole.ADMIN_REMOTE})
+  @RolesAllowed({AuthzRole.ADMIN, AuthzRole.ADMIN_REMOTE, AuthzRole.ADMIN_ACTIVATION})
   public Response restart() throws PipelineStoreException {
     LOG.info("Restart requested.");
     Thread thread = new Thread("Shutdown Request") {
@@ -143,7 +143,7 @@ public class AdminResource {
       authorizations = @Authorization(value = "basic")
   )
   @Produces(MediaType.APPLICATION_JSON)
-  @RolesAllowed({AuthzRole.ADMIN, AuthzRole.ADMIN_REMOTE})
+  @RolesAllowed({AuthzRole.ADMIN, AuthzRole.ADMIN_REMOTE, AuthzRole.ADMIN_ACTIVATION})
   public Response enableDPM(DPMInfoJson dpmInfo) throws IOException {
     Utils.checkNotNull(dpmInfo, "DPMInfo");
     SchAdmin.enableDPM(dpmInfo, new SchAdmin.Context(runtimeInfo, config));
@@ -404,30 +404,6 @@ public class AdminResource {
       .ok()
       .header("content-disposition", "attachment; filename=\"" + bundle.getBundleName() + "\"")
       .entity(bundle.getInputStream())
-      .build();
-  }
-
-  @GET
-  @Path("/bundle/upload")
-  @ApiOperation(
-      value = "Generates new support bundle and uploads it to StreamSets.",
-      response = Object.class,
-      authorizations = @Authorization(value = "basic")
-  )
-  @Consumes(MediaType.APPLICATION_JSON)
-  @Produces(MediaType.APPLICATION_JSON)
-  @RolesAllowed({
-      AuthzRole.ADMIN,
-      AuthzRole.ADMIN_REMOTE
-  })
-  public Response uploadSupportBundlesContentGenerators(
-    @QueryParam("generators") @DefaultValue("") String generators
-  ) throws IOException {
-    // The call with throw IOException on any error that will be propagated to the client
-    supportBundleManager.uploadNewBundle(getGeneratorList(generators), BundleType.SUPPORT);
-
-    return Response
-      .ok()
       .build();
   }
 

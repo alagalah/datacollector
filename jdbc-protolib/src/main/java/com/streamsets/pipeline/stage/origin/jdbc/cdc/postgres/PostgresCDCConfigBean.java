@@ -48,7 +48,7 @@ public class PostgresCDCConfigBean {
       required = true,
       type = ConfigDef.Type.STRING,
       label = "Start Date",
-      description = "Datetime to use for the initial change. Use the following format: DD-MM-YYYY HH24:MM:SS.",
+      description = "Datetime to use for the initial change. Use the following format: MM-DD-YYYY HH24:MM:SS.",
       displayPosition = 45,
       group = "CDC",
       dependsOn = "startValue",
@@ -126,6 +126,19 @@ public class PostgresCDCConfigBean {
   )
   @MultiValueChooserModel(PostgresChangeTypesChooserValues.class)
   public List<PostgresChangeTypeValues> postgresChangeTypes;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.NUMBER,
+      description = "Maximum amount of time to wait for data before sending a partial or empty batch",
+      label = "Batch Wait Time (ms)",
+      // Greater than poll time
+      defaultValue = "15000",
+      min = 1,
+      group = "CDC",
+      displayPosition = 90
+  )
+  public long maxBatchWaitTime = 1000L;
 
   //HIDDEN - only choice supported today
   @ConfigDef(

@@ -23,18 +23,17 @@
   <parent>
     <groupId>com.streamsets</groupId>
     <artifactId>streamsets-datacollector-root</artifactId>
-    <version>3.10.0-SNAPSHOT</version>
+    <version>3.19.0-SNAPSHOT</version>
     <relativePath>../root</relativePath>
   </parent>
   <groupId>com.streamsets</groupId>
   <artifactId>streamsets-datacollector-container</artifactId>
-  <version>3.10.0-SNAPSHOT</version>
+  <version>3.19.0-SNAPSHOT</version>
   <description>StreamSets Data Collector Container</description>
   <name>StreamSets Data Collector Container</name>
   <packaging>jar</packaging>
 
   <properties>
-    <aws.version>1.11.385</aws.version>
     <sdc.log4j.level>DEBUG</sdc.log4j.level>
     <airlift.version>0.7</airlift.version>
     <jexl.version>3.1</jexl.version>
@@ -46,10 +45,11 @@
       <artifactId>streamsets-datacollector-container-common</artifactId>
       <scope>provided</scope>
     </dependency>
+
     <dependency>
       <groupId>com.streamsets</groupId>
-      <artifactId>streamsets-datacollector-hadoop-common</artifactId>
-      <scope>provided</scope>
+      <artifactId>streamsets-datacollector-upgrader</artifactId>
+      <scope>compile</scope>
     </dependency>
     <dependency>
       <groupId>com.streamsets</groupId>
@@ -79,6 +79,11 @@
     <dependency>
       <groupId>com.streamsets</groupId>
       <artifactId>streamsets-datacollector-aws-support</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.streamsets</groupId>
+      <artifactId>streamsets-datacollector-google-cloud-support</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
@@ -338,6 +343,12 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <groupId>org.glassfish.jersey.test-framework.providers</groupId>
+      <artifactId>jersey-test-framework-provider-grizzly2</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
       <groupId>org.glassfish.jersey.test-framework</groupId>
       <artifactId>jersey-test-framework-core</artifactId>
       <scope>test</scope>
@@ -450,11 +461,27 @@
       <version>0.7.2</version>
     </dependency>
 
+    <dependency>
+      <groupId>fr.xebia.extras</groupId>
+      <artifactId>selma-processor</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>fr.xebia.extras</groupId>
+      <artifactId>selma</artifactId>
+      <version>${selma.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.avro</groupId>
+      <artifactId>avro</artifactId>
+      <version>${avro.version}</version>
+      <scope>test</scope>
+    </dependency>
+
     <!-- Support bundles -->
     <dependency>
       <groupId>com.amazonaws</groupId>
       <artifactId>aws-java-sdk-s3</artifactId>
-      <version>${aws.version}</version>
     </dependency>
   </dependencies>
 
@@ -463,14 +490,14 @@
       <resource>
         <directory>${basedir}/src/main/resources</directory>
         <excludes>
-          <exclude>datacollector-buildinfo.properties</exclude>
+          <exclude>sdc-buildinfo.properties</exclude>
         </excludes>
         <filtering>false</filtering>
       </resource>
       <resource>
         <directory>${basedir}/src/main/resources</directory>
         <includes>
-          <include>datacollector-buildinfo.properties</include>
+          <include>sdc-buildinfo.properties</include>
           <include>sdc-log4j.properties-default</include>
         </includes>
         <filtering>true</filtering>
@@ -497,7 +524,6 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-dependency-plugin</artifactId>
-        <version>2.10</version>
         <executions>
           <execution>
             <id>copy-agent</id>
@@ -528,6 +554,7 @@
           <argLine>${surefireArgLine} -javaagent:${project.build.directory}/agents/streamsets-datacollector-bootstrap-${project.version}.jar -Dsun.net.http.allowRestrictedHeaders=true</argLine>
           <systemPropertyVariables>
             <streamsets.test.mode>true</streamsets.test.mode>
+            <jersey.config.test.container.factory>org.glassfish.jersey.test.inmemory.InMemoryTestContainerFactory</jersey.config.test.container.factory>
           </systemPropertyVariables>
           <forkCount>1</forkCount>
         </configuration>

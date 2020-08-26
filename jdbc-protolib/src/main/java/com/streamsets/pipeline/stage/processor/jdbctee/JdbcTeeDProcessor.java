@@ -31,6 +31,7 @@ import com.streamsets.pipeline.lib.el.TimeNowEL;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
 import com.streamsets.pipeline.lib.jdbc.JdbcFieldColumnParamMapping;
 import com.streamsets.pipeline.lib.jdbc.JDBCOperationChooserValues;
+import com.streamsets.pipeline.lib.jdbc.JdbcHikariPoolConfigBean;
 import com.streamsets.pipeline.lib.operation.ChangeLogFormat;
 import com.streamsets.pipeline.lib.jdbc.JdbcFieldColumnMapping;
 import com.streamsets.pipeline.lib.jdbc.JDBCOperationType;
@@ -41,10 +42,11 @@ import com.streamsets.pipeline.stage.destination.jdbc.Groups;
 import java.util.List;
 
 @StageDef(
-    version = 3,
+    version = 4,
     label = "JDBC Tee",
     description = "Write records to JDBC and enrich records with generated columns",
     upgrader = JdbcTeeUpgrader.class,
+    upgraderDef = "upgrader/JdbcTeeDProcessor.yaml",
     icon = "rdbms.png",
     onlineHelpRefUrl ="index.html?contextID=task_qpj_ncy_hw"
 )
@@ -65,6 +67,7 @@ public class JdbcTeeDProcessor extends DProcessor {
   public String schema;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.STRING,
       elDefs = {RecordEL.class, TimeEL.class, TimeNowEL.class},
@@ -188,7 +191,22 @@ public class JdbcTeeDProcessor extends DProcessor {
   public boolean rollbackOnError;
 
   @ConfigDefBean()
-  public HikariPoolConfigBean hikariConfigBean;
+  public JdbcHikariPoolConfigBean hikariConfigBean;
+
+  /**
+   * Returns the Hikari config bean.
+   * <p/>
+   * This method is used to pass the Hikari config bean to the underlaying connector.
+   * <p/>
+   * Subclasses may override this method to provide specific vendor configurations.
+   * <p/>
+   * IMPORTANT: when a subclass is overriding this method to return a specialized HikariConfigBean, the config property
+   * itself in the connector subclass must have the same name as the config property in this class, this is
+   * "hikariConfigBean".
+   */
+  protected HikariPoolConfigBean getHikariConfigBean() {
+    return hikariConfigBean;
+  }
 
   @Override
   protected Processor createProcessor() {
@@ -201,7 +219,7 @@ public class JdbcTeeDProcessor extends DProcessor {
         useMultiRowOp,
         maxPrepStmtParameters,
         changeLogFormat,
-        hikariConfigBean,
+        getHikariConfigBean(),
         defaultOperation,
         unsupportedAction
     );

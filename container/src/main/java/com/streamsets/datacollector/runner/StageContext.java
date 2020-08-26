@@ -24,6 +24,7 @@ import com.streamsets.datacollector.config.ConfigDefinition;
 import com.streamsets.datacollector.email.EmailSender;
 import com.streamsets.datacollector.lineage.LineageEventImpl;
 import com.streamsets.datacollector.lineage.LineagePublisherDelegator;
+import com.streamsets.datacollector.main.BuildInfo;
 import com.streamsets.datacollector.main.RuntimeInfo;
 import com.streamsets.datacollector.record.EventRecordImpl;
 import com.streamsets.datacollector.record.HeaderImpl;
@@ -44,10 +45,12 @@ import com.streamsets.pipeline.api.Processor;
 import com.streamsets.pipeline.api.PushSource;
 import com.streamsets.pipeline.api.Record;
 import com.streamsets.pipeline.api.Source;
+import com.streamsets.pipeline.api.SourceResponseSink;
 import com.streamsets.pipeline.api.Stage;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.StageType;
 import com.streamsets.pipeline.api.Target;
+import com.streamsets.pipeline.api.gateway.GatewayInfo;
 import com.streamsets.pipeline.api.impl.ErrorMessage;
 import com.streamsets.pipeline.api.impl.Utils;
 import com.streamsets.pipeline.api.lineage.LineageEvent;
@@ -59,13 +62,14 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class StageContext extends ProtoContext implements
     Source.Context, PushSource.Context, Target.Context, Processor.Context {
   private static final String JOB_ID = "JOB_ID";
+  private static final String JOB_NAME = "JOB_NAME";
   private final int runnerId;
   private final List<Stage.Info> pipelineInfo;
   private final Stage.UserContext userContext;
@@ -89,9 +93,11 @@ public class StageContext extends ProtoContext implements
   private final long startTime;
   private final LineagePublisherDelegator lineagePublisherDelegator;
   private PipelineFinisherDelegate pipelineFinisherDelegate;
+  private BuildInfo buildInfo;
   private RuntimeInfo runtimeInfo;
   private final Map services;
   private final boolean isErrorStage;
+  private final RecordCloner recordCloner;
 
   //for SDK
   public StageContext(
@@ -176,8 +182,9 @@ public class StageContext extends ProtoContext implements
     this.runtimeInfo = runtimeInfo;
     this.services = services;
     this.isErrorStage = false;
+    this.recordCloner = new RecordCloner(false);
 
-    this.sourceResponseSink = new SourceResponseSink();
+    this.sourceResponseSink = new SourceResponseSinkImpl();
 
     // sample all records while testing
     this.startTime = System.currentTimeMillis();
@@ -203,6 +210,7 @@ public class StageContext extends ProtoContext implements
       Stage.Info stageInfo,
       ExecutionMode executionMode,
       DeliveryGuarantee deliveryGuarantee,
+      BuildInfo buildInfo,
       RuntimeInfo runtimeInfo,
       EmailSender emailSender,
       Configuration configuration,
@@ -213,7 +221,8 @@ public class StageContext extends ProtoContext implements
       boolean isErrorStage,
       AntennaDoctor antennaDoctor,
       AntennaDoctorStageContext antennaDoctorContext,
-      StatsCollector statsCollector
+      StatsCollector statsCollector,
+      boolean recordByRef
   ) {
     super(
       configuration,
@@ -244,6 +253,7 @@ public class StageContext extends ProtoContext implements
     this.onRecordError = onRecordError;
     this.executionMode = executionMode;
     this.deliveryGuarantee = deliveryGuarantee;
+    this.buildInfo = buildInfo;
     this.runtimeInfo = runtimeInfo;
     this.sdcId = runtimeInfo.getId();
     this.sharedRunnerMap = sharedRunnerMap;
@@ -251,6 +261,7 @@ public class StageContext extends ProtoContext implements
     this.lineagePublisherDelegator = lineagePublisherDelegator;
     this.services = services;
     this.isErrorStage = isErrorStage;
+    this.recordCloner = new RecordCloner(recordByRef);
   }
 
   @Override
@@ -289,6 +300,16 @@ public class StageContext extends ProtoContext implements
   }
 
   @Override
+  public String registerApiGateway(GatewayInfo gatewayInfo) {
+    return runtimeInfo.registerApiGateway(gatewayInfo);
+  }
+
+  @Override
+  public void unregisterApiGateway(GatewayInfo gatewayInfo) {
+    runtimeInfo.unregisterApiGateway(gatewayInfo);
+  }
+
+  @Override
   public void commitOffset(String entity, String offset) {
     pushSourceContextDelegate.commitOffset(entity, offset);
   }
@@ -301,6 +322,11 @@ public class StageContext extends ProtoContext implements
   @Override
   public Stage.Info getStageInfo() {
     return stageInfo;
+  }
+
+  @Override
+  public String getEnvironmentVersion() {
+    return buildInfo.getVersion();
   }
 
   @Override
@@ -439,7 +465,8 @@ public class StageContext extends ProtoContext implements
 
   private void toError(Record record, ErrorMessage errorMessage) {
     String jobId = (String) getPipelineConstants().get(JOB_ID);
-    RecordImpl recordImpl = ((RecordImpl) record).clone();
+    String jobName = (String) getPipelineConstants().get(JOB_NAME);
+    RecordImpl recordImpl = recordCloner.cloneRecordIfNeeded(record);
     if (recordImpl.isInitialRecord()) {
       recordImpl.getHeader().setSourceRecord(recordImpl);
       recordImpl.setInitialRecord(false);
@@ -447,6 +474,9 @@ public class StageContext extends ProtoContext implements
     recordImpl.getHeader().setError(stageInfo.getInstanceName(), stageInfo.getLabel(), errorMessage);
     if (jobId != null) {
       recordImpl.getHeader().setErrorJobId(jobId);
+    }
+    if (jobName != null) {
+      recordImpl.getHeader().setErrorJobName(jobName);
     }
     errorSink.addRecord(stageInfo.getInstanceName(), recordImpl);
   }
@@ -565,7 +595,7 @@ public class StageContext extends ProtoContext implements
 
   @Override
   public void toEvent(EventRecord record) {
-    EventRecordImpl recordImpl = ((EventRecordImpl) record).clone();
+    EventRecordImpl recordImpl = recordCloner.cloneEventIfNeeded(record);
     if (recordImpl.isInitialRecord()) {
       recordImpl.getHeader().setSourceRecord(recordImpl);
       recordImpl.setInitialRecord(false);

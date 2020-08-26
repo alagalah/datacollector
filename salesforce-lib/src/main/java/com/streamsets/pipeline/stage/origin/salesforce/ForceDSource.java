@@ -27,7 +27,7 @@ import com.streamsets.pipeline.lib.event.NoMoreDataEvent;
 import com.streamsets.pipeline.lib.salesforce.ForceSourceConfigBean;
 
 @StageDef(
-    version = 2,
+    version = 4,
     label = "Salesforce",
     description = "Reads data from Salesforce",
     icon = "salesforce.png",
@@ -37,6 +37,7 @@ import com.streamsets.pipeline.lib.salesforce.ForceSourceConfigBean;
     producesEvents = true,
     eventDefs = {NoMoreDataEvent.class},
     upgrader = ForceSourceUpgrader.class,
+    upgraderDef = "upgrader/ForceDSource.yaml",
     onlineHelpRefUrl ="index.html?contextID=task_h1n_bs3_rx"
 )
 @ConfigGroups(value = Groups.class)

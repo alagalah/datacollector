@@ -23,11 +23,14 @@ import com.streamsets.pipeline.api.HideConfigs;
 import com.streamsets.pipeline.api.PushSource;
 import com.streamsets.pipeline.api.StageDef;
 import com.streamsets.pipeline.api.base.configurablestage.DPushSource;
+import com.streamsets.pipeline.config.DataFormat;
 import com.streamsets.pipeline.lib.dirspooler.SpoolDirConfigBean;
 import com.streamsets.pipeline.stage.conf.DataLakeSourceGroups;
 
+import static com.streamsets.pipeline.config.OriginAvroSchemaSource.SOURCE;
+
 @StageDef(
-    version = 1,
+    version = 2,
     label = "Azure Data Lake Storage Gen1",
     description = "Reads data from Azure Data Lake Storage Gen1",
     icon = "data-lake-store-gen1.png",
@@ -35,8 +38,8 @@ import com.streamsets.pipeline.stage.conf.DataLakeSourceGroups;
     execution = ExecutionMode.STANDALONE,
     recordsByRef = true,
     resetOffset = true,
-    onlineHelpRefUrl = "index.html?contextID=task_t13_ht5_5hb",
-    beta = true
+    upgraderDef = "upgrader/DataLakeDSource.yaml",
+    onlineHelpRefUrl = "index.html?contextID=task_t13_ht5_5hb"
 )
 @ConfigGroups(value = DataLakeSourceGroups.class)
 @HideConfigs(value = {
@@ -44,7 +47,15 @@ import com.streamsets.pipeline.stage.conf.DataLakeSourceGroups;
     "dataLakeConfig.hdfsUser",
     "dataLakeConfig.hdfsKerberos",
     "dataLakeConfig.hdfsConfDir",
-    "dataLakeConfig.hdfsConfigs"
+    "dataLakeConfig.hdfsConfigs",
+    "spoolDirConfig.allowLateDirectory",
+    "spoolDirConfig.dataFormatConfig.verifyChecksum",
+    "spoolDirConfig.dataFormatConfig.avroSchemaSource",
+    "spoolDirConfig.dataFormatConfig.avroSchema",
+    "spoolDirConfig.dataFormatConfig.schemaRegistryUrls",
+    "spoolDirConfig.dataFormatConfig.schemaLookupMode",
+    "spoolDirConfig.dataFormatConfig.subject",
+    "spoolDirConfig.dataFormatConfig.schemaId"
 })
 @GenerateResourceBundle
 public class DataLakeDSource extends DPushSource {
@@ -57,6 +68,10 @@ public class DataLakeDSource extends DPushSource {
 
   @Override
   protected PushSource createPushSource() {
+    if (spoolDirConfig.dataFormat == DataFormat.AVRO) {
+      spoolDirConfig.dataFormatConfig.avroSchemaSource = SOURCE;
+    }
+
     return new DataLakeSource(spoolDirConfig, dataLakeConfig);
   }
 }

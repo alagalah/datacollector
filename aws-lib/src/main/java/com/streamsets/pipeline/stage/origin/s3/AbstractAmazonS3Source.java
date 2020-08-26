@@ -16,10 +16,10 @@
 package com.streamsets.pipeline.stage.origin.s3;
 
 import com.google.common.base.Throwables;
+import com.streamsets.pipeline.api.InterfaceAudience;
+import com.streamsets.pipeline.api.InterfaceStability;
 import com.streamsets.pipeline.api.StageException;
 import com.streamsets.pipeline.api.base.BasePushSource;
-import com.streamsets.pipeline.common.InterfaceAudience;
-import com.streamsets.pipeline.common.InterfaceStability;
 import com.streamsets.pipeline.lib.executor.SafeScheduledExecutorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,6 +93,9 @@ public abstract class AbstractAmazonS3Source extends BasePushSource {
   @Override
   public void produce(Map<String, String> lastSourceOffset, int maxBatchSize) throws StageException {
     int batchSize = Math.min(s3ConfigBean.basicConfig.maxBatchSize, maxBatchSize);
+    if (!getContext().isPreview() && s3ConfigBean.basicConfig.maxBatchSize > maxBatchSize) {
+      getContext().reportError(Errors.S3_SPOOLDIR_27, maxBatchSize);
+    }
 
     amazonS3Source.handleOffset(lastSourceOffset, getContext());
 

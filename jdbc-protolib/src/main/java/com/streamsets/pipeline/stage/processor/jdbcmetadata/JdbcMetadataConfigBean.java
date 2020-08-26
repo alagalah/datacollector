@@ -20,7 +20,7 @@ import com.streamsets.pipeline.api.ConfigDefBean;
 import com.streamsets.pipeline.lib.el.RecordEL;
 import com.streamsets.pipeline.lib.el.TimeEL;
 import com.streamsets.pipeline.lib.el.TimeNowEL;
-import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
+import com.streamsets.pipeline.lib.jdbc.BrandedHikariPoolConfigBean;
 
 public class JdbcMetadataConfigBean {
   @ConfigDef(
@@ -35,6 +35,7 @@ public class JdbcMetadataConfigBean {
   public String schemaEL;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.STRING,
       elDefs = {RecordEL.class, TimeEL.class, TimeNowEL.class},
@@ -49,7 +50,7 @@ public class JdbcMetadataConfigBean {
   public String tableNameEL;
 
   @ConfigDefBean
-  public HikariPoolConfigBean hikariConfigBean;
+  public BrandedHikariPoolConfigBean hikariConfigBean;
 
   @ConfigDefBean
   public DecimalDefaultsConfig decimalDefaultsConfig;

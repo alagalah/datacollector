@@ -47,6 +47,8 @@ public class ChrootSFTPClient {
   private SFTPClient sftpClient;
   private final boolean disableReadAheadStream;
 
+  private int bufferSizeReadAheadStream;
+
   /**
    * Wraps the provided {@link SFTPClient} at the given root.  The given root can either be an absolute path or a path
    * relative to the user's home directory.
@@ -141,7 +143,7 @@ public class ChrootSFTPClient {
     if (disableReadAheadStream) {
       return SFTPStreamFactory.createInputStream(remoteFile);
     } else {
-      return SFTPStreamFactory.createReadAheadInputStream(remoteFile);
+      return SFTPStreamFactory.createReadAheadInputStream(remoteFile, bufferSizeReadAheadStream);
     }
   }
 
@@ -196,6 +198,17 @@ public class ChrootSFTPClient {
     renameInternal(fromPath, toPath, true);
   }
 
+  public boolean rename(String fromPath, String toPath, boolean overwriteFile) throws IOException {
+    fromPath = prependRoot(fromPath);
+    toPath = prependRoot(toPath);
+
+    if (!overwriteFile && sftpClient.statExistence(toPath) != null) {
+      return false;
+    }
+    renameInternal(fromPath, toPath, true);
+    return true;
+  }
+
   private void renameInternal(String fromPath, String toPath, boolean deleteExists) throws IOException {
     // Create the toPath's parent dir(s) if they don't exist
     String toDir = Paths.get(toPath).getParent().toString();
@@ -233,5 +246,13 @@ public class ChrootSFTPClient {
     public FileMode.Type getType() {
       return type;
     }
+  }
+
+  public int getBufferSizeReadAheadStream() {
+    return bufferSizeReadAheadStream;
+  }
+
+  public void setBufferSizeReadAheadStream(int bufferSizeReadAheadStream) {
+    this.bufferSizeReadAheadStream = bufferSizeReadAheadStream;
   }
 }

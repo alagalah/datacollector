@@ -16,11 +16,13 @@
 
 package com.streamsets.datacollector.event.handler.remote;
 
+import com.streamsets.datacollector.config.ConnectionConfiguration;
 import com.streamsets.datacollector.config.PipelineConfiguration;
 import com.streamsets.datacollector.config.RuleDefinitions;
 import com.streamsets.datacollector.event.dto.AckEvent;
 import com.streamsets.datacollector.event.dto.PipelineStartEvent;
 import com.streamsets.datacollector.event.handler.DataCollector;
+import com.streamsets.datacollector.execution.PipelineState;
 import com.streamsets.datacollector.execution.Runner;
 import com.streamsets.datacollector.runner.StageOutput;
 import com.streamsets.datacollector.runner.production.SourceOffset;
@@ -33,6 +35,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.function.Function;
 
@@ -51,9 +54,9 @@ public class PipelineIdEncodedRemoteDatacollector implements DataCollector {
 
   @Override
   public void start(
-      Runner.StartPipelineContext context, String name, String rev
+      Runner.StartPipelineContext context, String name, String rev, Set<String> groups
   ) throws PipelineException, StageException {
-    remoteDataCollector.start(context, replaceColonWithDoubleUnderscore(name), rev);
+    remoteDataCollector.start(context, replaceColonWithDoubleUnderscore(name), rev, groups);
   }
 
   @Override
@@ -80,7 +83,8 @@ public class PipelineIdEncodedRemoteDatacollector implements DataCollector {
       SourceOffset offset,
       PipelineConfiguration pipelineConfiguration,
       RuleDefinitions ruleDefinitions,
-      Acl acl, Map<String, Object> metadata
+      Acl acl, Map<String, Object> metadata,
+      Map<String, ConnectionConfiguration> connections
   ) throws PipelineException {
     Map<String, Object> attribs = new HashMap<>();
     attribs.put(RemoteDataCollector.IS_REMOTE_PIPELINE, true);
@@ -94,7 +98,8 @@ public class PipelineIdEncodedRemoteDatacollector implements DataCollector {
         pipelineConfiguration,
         ruleDefinitions,
         acl,
-        attribs
+        attribs,
+        connections
     );
   }
 
@@ -176,7 +181,8 @@ public class PipelineIdEncodedRemoteDatacollector implements DataCollector {
       long timeoutMillis,
       boolean testOrigin,
       List<PipelineStartEvent.InterceptorConfiguration> interceptorConfs,
-      Function<Object, Void> afterActionsFunction
+      Function<Object, Void> afterActionsFunction,
+      Map<String, ConnectionConfiguration> connections
   ) throws PipelineException {
     return remoteDataCollector.previewPipeline(
         user,
@@ -191,11 +197,22 @@ public class PipelineIdEncodedRemoteDatacollector implements DataCollector {
         timeoutMillis,
         testOrigin,
         interceptorConfs,
-        afterActionsFunction
+        afterActionsFunction,
+        connections
     );
   }
 
   static String replaceColonWithDoubleUnderscore(String name) {
     return name.replaceAll(":", "__");
+  }
+
+  @Override
+  public Runner getRunner(String name, String rev) throws PipelineException  {
+    return remoteDataCollector.getRunner(replaceColonWithDoubleUnderscore(name), rev);
+  }
+
+  @Override
+  public List<PipelineState> getRemotePipelines() throws PipelineException {
+    return remoteDataCollector.getRemotePipelines();
   }
 }

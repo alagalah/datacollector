@@ -28,11 +28,12 @@ import com.streamsets.pipeline.api.base.configurablestage.DTarget;
 import com.streamsets.pipeline.lib.el.RecordEL;
 import com.streamsets.pipeline.lib.el.TimeEL;
 import com.streamsets.pipeline.lib.el.TimeNowEL;
-import com.streamsets.pipeline.lib.operation.ChangeLogFormat;
 import com.streamsets.pipeline.lib.jdbc.HikariPoolConfigBean;
-import com.streamsets.pipeline.lib.jdbc.JdbcFieldColumnParamMapping;
-import com.streamsets.pipeline.lib.jdbc.JDBCOperationType;
 import com.streamsets.pipeline.lib.jdbc.JDBCOperationChooserValues;
+import com.streamsets.pipeline.lib.jdbc.JDBCOperationType;
+import com.streamsets.pipeline.lib.jdbc.JdbcFieldColumnParamMapping;
+import com.streamsets.pipeline.lib.jdbc.JdbcHikariPoolConfigBean;
+import com.streamsets.pipeline.lib.operation.ChangeLogFormat;
 import com.streamsets.pipeline.lib.operation.ChangeLogFormatChooserValues;
 import com.streamsets.pipeline.lib.operation.UnsupportedOperationAction;
 import com.streamsets.pipeline.lib.operation.UnsupportedOperationActionChooserValues;
@@ -42,10 +43,11 @@ import java.util.List;
 
 @GenerateResourceBundle
 @StageDef(
-    version = 7,
+    version = 11,
     label = "JDBC Producer",
     description = "Insert, update, and delete data to a JDBC destination.",
     upgrader = JdbcTargetUpgrader.class,
+    upgraderDef = "upgrader/JdbcDTarget.yaml",
     icon = "rdbms.png",
     onlineHelpRefUrl ="index.html?contextID=task_cx3_lhh_htq"
 )
@@ -57,11 +59,13 @@ import java.util.List;
 public class JdbcDTarget extends DTarget {
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = false,
       type = ConfigDef.Type.STRING,
       elDefs = {RecordEL.class, TimeEL.class, TimeNowEL.class},
       evaluation = ConfigDef.Evaluation.EXPLICIT,
       label = "Schema Name",
+      defaultValue = "",
       description = "You can use an expression with time and record functions to specify multiple schema names.",
       displayPosition = 20,
       group = "JDBC"
@@ -69,11 +73,12 @@ public class JdbcDTarget extends DTarget {
   public String schema;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.BASIC,
       required = true,
       type = ConfigDef.Type.STRING,
       elDefs = {RecordEL.class, TimeEL.class, TimeNowEL.class},
       evaluation = ConfigDef.Evaluation.EXPLICIT,
-      defaultValue = "${record:attribute('tableName')}",
+      defaultValue = "<tableName>",
       label = "Table Name",
       description = "Table Names should contain only table names. Schema should be defined in the connection string or " +
           "schema configuration",
@@ -83,9 +88,10 @@ public class JdbcDTarget extends DTarget {
   public String tableNameTemplate;
 
   @ConfigDef(
-      required = true,
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
+      required = false,
       type = ConfigDef.Type.MODEL,
-      defaultValue = "",
+      defaultValue = "[]",
       label = "Field to Column Mapping",
       description = "Optionally specify additional field mappings when input field name and column name don't match.",
       displayPosition = 40,
@@ -95,6 +101,7 @@ public class JdbcDTarget extends DTarget {
   public List<JdbcFieldColumnParamMapping> columnNames;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       label = "Enclose Object Names",
@@ -107,6 +114,7 @@ public class JdbcDTarget extends DTarget {
   public boolean encloseTableName;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.MODEL,
       label = "Change Log Format",
@@ -119,18 +127,20 @@ public class JdbcDTarget extends DTarget {
   public ChangeLogFormat changeLogFormat;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
-      defaultValue = "",
+      defaultValue = "INSERT",
       label = "Default Operation",
       description = "Default operation to perform if sdc.operation.type is not set in record header.",
       displayPosition = 50,
       group = "JDBC"
   )
   @ValueChooserModel(JDBCOperationChooserValues.class)
-  public JDBCOperationType defaultOperation;
+  public JDBCOperationType defaultOperation = JDBCOperationType.INSERT;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.MODEL,
       defaultValue= "DISCARD",
@@ -143,6 +153,7 @@ public class JdbcDTarget extends DTarget {
   public UnsupportedOperationAction unsupportedAction;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       defaultValue = "false",
@@ -154,6 +165,7 @@ public class JdbcDTarget extends DTarget {
   public boolean useMultiRowInsert;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.NUMBER,
       defaultValue = "-1",
@@ -168,6 +180,7 @@ public class JdbcDTarget extends DTarget {
   public int maxPrepStmtParameters;
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = true,
       type = ConfigDef.Type.BOOLEAN,
       defaultValue = "false",
@@ -180,9 +193,25 @@ public class JdbcDTarget extends DTarget {
   public boolean rollbackOnError;
 
   @ConfigDefBean()
-  public HikariPoolConfigBean hikariConfigBean;
+  public JdbcHikariPoolConfigBean hikariConfigBean;
+
+  /**
+   * Returns the Hikari config bean.
+   * <p/>
+   * This method is used to pass the Hikari config bean to the underlaying connector.
+   * <p/>
+   * Subclasses may override this method to provide specific vendor configurations.
+   * <p/>
+   * IMPORTANT: when a subclass is overriding this method to return a specialized HikariConfigBean, the config property
+   * itself in the connector subclass must have the same name as the config property in this class, this is
+   * "hikariConfigBean".
+   */
+  protected HikariPoolConfigBean getHikariConfigBean() {
+    return hikariConfigBean;
+  }
 
   @ConfigDef(
+      displayMode = ConfigDef.DisplayMode.ADVANCED,
       required = false,
       type = ConfigDef.Type.LIST,
       label = "Data SQLSTATE Codes",
@@ -195,7 +224,7 @@ public class JdbcDTarget extends DTarget {
   @Override
   protected Target createTarget() {
     return new JdbcTarget(
-        schema,
+        getSchema(),
         tableNameTemplate,
         columnNames, encloseTableName,
         rollbackOnError,
@@ -204,8 +233,12 @@ public class JdbcDTarget extends DTarget {
         changeLogFormat,
         defaultOperation,
         unsupportedAction,
-        hikariConfigBean,
+        getHikariConfigBean(),
         customDataSqlStateCodes
     );
+  }
+
+  public String getSchema() {
+    return schema;
   }
 }

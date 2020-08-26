@@ -32,6 +32,7 @@ import com.streamsets.pipeline.api.service.dataformats.log.LogParserService;
     icon="logparser.png",
     onlineHelpRefUrl ="index.html?contextID=task_jm1_b4w_fs",
     upgrader = LogParserUpgrader.class,
+    upgraderDef = "upgrader/LogParserDProcessor.yaml",
     services = @ServiceDependency(
         service = LogParserService.class
     )
@@ -47,6 +48,7 @@ public class LogParserDProcessor extends DProcessor {
       label = "Field to Parse",
       description = "String field that contains a LOG line",
       displayPosition = 10,
+      displayMode = ConfigDef.DisplayMode.BASIC,
       group = "LOG"
   )
   @FieldSelectorModel(singleValued = true)
@@ -59,6 +61,7 @@ public class LogParserDProcessor extends DProcessor {
     label = "New Parsed Field",
     description="Name of the new field to set the parsed JSON data",
     displayPosition = 20,
+      displayMode = ConfigDef.DisplayMode.BASIC,
     group = "LOG"
   )
   public String parsedFieldPath;

@@ -17,15 +17,16 @@ package com.streamsets.datacollector.creation;
 
 import com.streamsets.datacollector.config.AmazonEMRConfig;
 import com.streamsets.datacollector.config.DatabricksConfig;
-import com.streamsets.datacollector.config.LogLevel;
 import com.streamsets.pipeline.api.Config;
 import com.streamsets.pipeline.api.ExecutionMode;
 import com.streamsets.pipeline.api.StageException;
+import com.streamsets.pipeline.lib.googlecloud.GoogleCloudConfig;
 import com.streamsets.testing.pipeline.stage.TestUpgraderContext;
 import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -102,50 +103,7 @@ public class TestPipelineConfigUpgrader {
 
   @Test
   public void testPipelineConfigUpgradeV9ToV10() throws StageException {
-    PipelineConfigUpgrader pipelineConfigUpgrader = new PipelineConfigUpgrader();
-    TestUpgraderContext context = new TestUpgraderContext("x", "y", "z", 9, 10);
-    List<Config> upgraded = pipelineConfigUpgrader.upgrade(new ArrayList<>(), context);
-
-    List<Config> testOriginStageConfigList = upgraded.stream()
-        .filter(config -> config.getName().equals("testOriginStage"))
-        .collect(Collectors.toList());
-
-    Assert.assertEquals(1, testOriginStageConfigList.size());
-    Assert.assertEquals(PipelineConfigBean.RAW_DATA_ORIGIN, testOriginStageConfigList.get(0).getValue());
-
-    List<Config> logLevelConfigList = upgraded.stream().filter(config -> config.getName().equals("logLevel")).collect(
-        Collectors.toList());
-
-    Assert.assertEquals(1, logLevelConfigList.size());
-    Assert.assertEquals(LogLevel.INFO.getLabel(), logLevelConfigList.get(0).getValue());
-
-    List<String> emrConfigList = upgraded.stream()
-        .map(conf -> conf.getName().replaceAll("amazonEMRConfig.",""))
-        .collect(Collectors.toList());
-
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.ACCESS_KEY));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SECRET_KEY));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.CLUSTER_ID));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.CLUSTER_PREFIX));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.EC2_SUBNET_ID));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.ENABLE_EMR_DEBUGGING));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.INSTANCE_COUNT));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.JOB_FLOW_ROLE));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.MASTER_INSTANCE_TYPE));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.MASTER_SECURITY_GROUP));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.MASTER_INSTANCE_TYPE_CUSTOM));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SLAVE_INSTANCE_TYPE));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SLAVE_SECURITY_GROUP));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SLAVE_INSTANCE_TYPE_CUSTOM));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.PROVISION_NEW_CLUSTER));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.S3_LOG_URI));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.S3_STAGING_URI));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SERVICE_ROLE));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.USER_REGION));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.USER_REGION_CUSTOM));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.TERMINATE_CLUSTER));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.VISIBLE_TO_ALL_USERS));
-    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.LOGGING_ENABLED));
+    doTestEMRConfigs(9, 10);
   }
 
   @Test
@@ -200,5 +158,145 @@ public class TestPipelineConfigUpgrader {
     Assert.assertNull(upgrade.get(1).getValue());
     Assert.assertEquals("databricksConfig.terminateCluster", upgrade.get(2).getName());
     Assert.assertEquals(upgrade.get(2).getValue(), false);
+  }
+
+
+  @Test
+  public void testPipelineConfigUpgradeV14ToV15() throws StageException {
+    PipelineConfigUpgrader pipelineConfigUpgrader = new PipelineConfigUpgrader();
+    TestUpgraderContext context = new TestUpgraderContext("x", "y", "z", 14, 15);
+
+    List<Config> upgrade = pipelineConfigUpgrader.upgrade(new ArrayList<>(), context);
+
+    Assert.assertEquals("ludicrousMode", upgrade.get(0).getName());
+    Assert.assertEquals(false, upgrade.get(0).getValue());
+    Assert.assertEquals("ludicrousModeInputCount", upgrade.get(1).getName());
+    Assert.assertEquals(false, upgrade.get(1).getValue());
+    Assert.assertEquals("advancedErrorHandling", upgrade.get(2).getName());
+    Assert.assertEquals(false, upgrade.get(2).getValue());
+    Assert.assertEquals("triggerInterval", upgrade.get(3).getName());
+    Assert.assertEquals(2000, upgrade.get(3).getValue());
+  }
+
+  @Test
+  public void testPipelineConfigUpgradeV15ToV16() throws StageException {
+    PipelineConfigUpgrader pipelineConfigUpgrader = new PipelineConfigUpgrader();
+    TestUpgraderContext context = new TestUpgraderContext("x", "y", "z", 15, 16);
+
+    List<Config> upgrade = pipelineConfigUpgrader.upgrade(new ArrayList<>(), context);
+
+    Assert.assertEquals("preprocessScript", upgrade.get(0).getName());
+    Assert.assertEquals("", upgrade.get(0).getValue());
+  }
+
+  @Test
+  public void testPipelineConfigUpgradeV16ToV17() throws StageException {
+    doTestEMRConfigs(16, 17);
+  }
+
+  @Test
+  public void testPipelineConfigUpgradeV17ToV18() throws StageException {
+    PipelineConfigUpgrader pipelineConfigUpgrader = new PipelineConfigUpgrader();
+    TestUpgraderContext context = new TestUpgraderContext("x", "y", "z", 17, 18);
+
+    List<Config> upgrade = pipelineConfigUpgrader.upgrade(new ArrayList<>(), context);
+
+    Assert.assertEquals("transformerEMRConfig.serviceAccessSecurityGroup", upgrade.get(0).getName());
+    Assert.assertNull(upgrade.get(0).getValue());
+  }
+
+  @Test
+  public void testPipelineConfigUpgradeV18ToV19() throws StageException {
+    doTestDataprocConfigs(18, 19);
+  }
+
+  private void doTestEMRConfigs(int from, int to) {
+    PipelineConfigUpgrader pipelineConfigUpgrader = new PipelineConfigUpgrader();
+    TestUpgraderContext context = new TestUpgraderContext("x", "y", "z", from, to);
+    List<Config> upgraded = pipelineConfigUpgrader.upgrade(new ArrayList<>(), context);
+
+    String regex = to == 10 ? "amazonEMRConfig." : "transformerEMRConfig.";
+    List<String> emrConfigList = upgraded.stream()
+                                   .map(conf -> conf.getName().replaceAll(regex,""))
+                                   .collect(Collectors.toList());
+
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.ACCESS_KEY));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SECRET_KEY));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.CLUSTER_ID));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.CLUSTER_PREFIX));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.EC2_SUBNET_ID));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.INSTANCE_COUNT));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.JOB_FLOW_ROLE));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.MASTER_INSTANCE_TYPE));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.MASTER_SECURITY_GROUP));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.MASTER_INSTANCE_TYPE_CUSTOM));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SLAVE_INSTANCE_TYPE));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SLAVE_SECURITY_GROUP));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SLAVE_INSTANCE_TYPE_CUSTOM));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.PROVISION_NEW_CLUSTER));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.S3_LOG_URI));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.S3_STAGING_URI));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.SERVICE_ROLE));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.USER_REGION));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.USER_REGION_CUSTOM));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.TERMINATE_CLUSTER));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.VISIBLE_TO_ALL_USERS));
+    Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.LOGGING_ENABLED));
+
+    if (to == 10) {
+      List<Config> testOriginStageConfigList = upgraded.stream()
+                                                 .filter(config -> config.getName().equals("testOriginStage"))
+                                                 .collect(Collectors.toList());
+
+      Assert.assertEquals(1, testOriginStageConfigList.size());
+      Assert.assertEquals(PipelineConfigBean.RAW_DATA_ORIGIN, testOriginStageConfigList.get(0).getValue());
+      Assert.assertTrue(emrConfigList.contains(AmazonEMRConfig.ENABLE_EMR_DEBUGGING));
+    }
+
+    if (to == 17) {
+      Assert.assertTrue(emrConfigList.contains("useIAMRoles"));
+      Assert.assertTrue(emrConfigList.contains("clusterConfig.callbackUrl"));
+    }
+  }
+
+  private void doTestDataprocConfigs(int from, int to) {
+    PipelineConfigUpgrader pipelineConfigUpgrader = new PipelineConfigUpgrader();
+    TestUpgraderContext context = new TestUpgraderContext("x", "y", "z", from, to);
+    List<Config> upgraded = pipelineConfigUpgrader.upgrade(new ArrayList<>(), context);
+
+    String regex = "googleCloudConfig.";
+    String regex2 = "googleCloudCredentialsConfig.";
+    List<Config> gcloudConfigList = upgraded.stream()
+                                      .map(conf -> new Config(conf.getName().replaceAll(regex, ""), conf.getValue()))
+                                      .map(conf -> new Config(conf.getName().replaceAll(regex2, ""), conf.getValue()))
+                                      .collect(Collectors.toList());
+    Iterator<Config> iter = gcloudConfigList.iterator();
+    assertInIter(iter, "region", null);
+    assertInIter(iter, "customRegion", null);
+    assertInIter(iter, "gcsStagingUri", null);
+    assertInIter(iter, "create", false);
+    assertInIter(iter, "clusterPrefix", null);
+    assertInIter(iter, "version", GoogleCloudConfig.DATAPROC_IMAGE_VERSION_DEFAULT);
+    assertInIter(iter, "masterType", null);
+    assertInIter(iter, "workerType", null);
+    assertInIter(iter, "networkType", null);
+    assertInIter(iter, "network", null);
+    assertInIter(iter, "subnet", null);
+    assertInIter(iter, "tags", new ArrayList<String>());
+    assertInIter(iter, "workerCount", 2);
+    assertInIter(iter, "clusterName", null);
+    assertInIter(iter, "terminate", false);
+
+    assertInIter(iter, "projectId", null);
+    assertInIter(iter, "credentialsProvider", null);
+    assertInIter(iter, "path", null);
+    assertInIter(iter, "credentialsFileContent", null);
+  }
+
+  private void assertInIter(Iterator<Config> conf, String key, Object value) {
+    Assert.assertTrue(conf.hasNext());
+    Config next = conf.next();
+    Assert.assertEquals(next.getName(), key);
+    Assert.assertEquals(next.getValue(), value);
   }
 }
